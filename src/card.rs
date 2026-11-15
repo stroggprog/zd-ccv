@@ -61,6 +61,28 @@ pub struct CardPayload {
     pub data: serde_json::Value,
     /// The full decoded JSON as embedded in the file.
     pub raw: serde_json::Value,
+    /// 0-based index of this chunk among chunks with the same keyword.
+    pub chunk_index: usize,
+    /// Total number of chunks with this keyword in the file.
+    pub chunk_total: usize,
+}
+
+impl CardPayload {
+    /// A human-readable label identifying the source chunk, e.g.
+    /// `chara chunk 2 of 2 (Character Card V2)`.
+    pub fn label(&self) -> String {
+        let position = if self.chunk_total > 1 {
+            format!(" {} of {}", self.chunk_index + 1, self.chunk_total)
+        } else {
+            String::new()
+        };
+        format!(
+            "{}{} ({})",
+            self.kind.keyword(),
+            position,
+            self.spec.label()
+        )
+    }
 }
 
 /// A card file loaded from disk: display payloads and non-fatal problems.
@@ -68,7 +90,11 @@ pub struct CardPayload {
 pub struct CardFile {
     pub path: PathBuf,
     pub warnings: Vec<String>,
-    /// Decoded payloads in display order; the first is the preferred one.
+    /// Every successfully decoded card payload, ordered the way
+    /// SillyTavern resolves them: `ccv3` chunks before `chara` chunks,
+    /// and within a keyword in file order. The first entry is the one
+    /// SillyTavern would use; viewers may offer the others for
+    /// selection.
     pub payloads: Vec<CardPayload>,
 }
 
@@ -109,7 +135,7 @@ fn load_json_file(path: &Path, warnings: &mut Vec<String>) -> Vec<CardPayload> {
         }
     };
     match serde_json::from_str::<serde_json::Value>(&text) {
-        Ok(value) => vec![classify(PayloadKind::Json, value)],
+        Ok(value) => vec![classify(PayloadKind::Json, value, 0, 1)],
         Err(e) => {
             warnings.push(format!("could not parse JSON: {e}"));
             Vec::new()
@@ -142,25 +168,18 @@ fn load_png_file(path: &Path, warnings: &mut Vec<String>) -> Vec<CardPayload> {
         if matching.is_empty() {
             continue;
         }
-        if matching.len() > 1 {
-            let texts: Vec<&str> = matching.iter().map(|t| t.as_str()).collect();
-            if texts.windows(2).any(|w| w[0] != w[1]) {
-                warnings.push(format!(
-                    "file contains {} conflicting `{}` chunks; using the last one",
-                    matching.len(),
-                    kind.keyword()
-                ));
-            } else {
-                warnings.push(format!(
-                    "file contains {} duplicate `{}` chunks",
-                    matching.len(),
-                    kind.keyword()
-                ));
+        // Keep every chunk: tools may add a second `chara` chunk with new
+        // data, so the viewer offers a selection instead of discarding.
+        for (i, text) in matching.iter().enumerate() {
+            match decode_payload(text) {
+                Ok(value) => payloads.push(classify(kind, value, i, matching.len())),
+                Err(e) => warnings.push(format!(
+                    "could not decode `{}` chunk {} of {}: {e}",
+                    kind.keyword(),
+                    i + 1,
+                    matching.len()
+                )),
             }
-        }
-        match decode_payload(matching.last().expect("non-empty")) {
-            Ok(value) => payloads.push(classify(kind, value)),
-            Err(e) => warnings.push(format!("could not decode `{}` chunk: {e}", kind.keyword())),
         }
     }
     payloads
@@ -178,7 +197,12 @@ fn decode_payload(text: &str) -> Result<serde_json::Value, String> {
 }
 
 /// Determine the spec version of a decoded payload and extract its data.
-fn classify(kind: PayloadKind, value: serde_json::Value) -> CardPayload {
+fn classify(
+    kind: PayloadKind,
+    value: serde_json::Value,
+    chunk_index: usize,
+    chunk_total: usize,
+) -> CardPayload {
     let spec = match value.get("spec").and_then(|s| s.as_str()) {
         Some("chara_card_v2") => SpecVersion::V2,
         Some("chara_card_v3") => SpecVersion::V3,
@@ -204,6 +228,8 @@ fn classify(kind: PayloadKind, value: serde_json::Value) -> CardPayload {
         spec,
         data,
         raw: value,
+        chunk_index,
+        chunk_total,
     }
 }
 
@@ -563,32 +589,38 @@ mod tests {
     }
 
     #[test]
-    fn last_duplicate_chunk_wins_and_conflicts_warn() {
+    fn duplicate_chunks_are_all_kept_first_is_preferred() {
+        // SillyTavern reads the *first* `chara` chunk, and other tools may
+        // add a second one; the viewer keeps every chunk for selection.
         let file = png_with(&[
             text_chunk("chara", &b64(&card_json("First", Some("chara_card_v2")))),
             text_chunk("chara", &b64(&card_json("Second", Some("chara_card_v2")))),
         ]);
         let path = temp_file("dup.png", &file);
         let card = load(&path);
-        assert_eq!(card.payloads.len(), 1);
-        assert!(card
-            .warnings
-            .iter()
-            .any(|w| w.contains("conflicting") && w.contains("chara")));
-        assert!(card.payloads[0].raw.to_string().contains("Second"));
+        assert_eq!(card.payloads.len(), 2);
+        assert!(card.warnings.is_empty(), "warnings: {:?}", card.warnings);
+        assert!(card.payloads[0].raw.to_string().contains("First"));
+        assert_eq!(card.payloads[0].chunk_index, 0);
+        assert_eq!(card.payloads[1].chunk_index, 1);
+        assert_eq!(card.payloads[0].chunk_total, 2);
+        assert!(card.payloads[0].label().contains("1 of 2"));
         fs::remove_file(path).ok();
     }
 
     #[test]
-    fn duplicate_chunks_agree_report_duplicates() {
-        let payload = b64(&card_json("Same", Some("chara_card_v2")));
-        let file = png_with(&[text_chunk("chara", &payload), text_chunk("chara", &payload)]);
-        let path = temp_file("dup2.png", &file);
+    fn one_undecodable_duplicate_still_keeps_the_rest() {
+        let file = png_with(&[
+            text_chunk("chara", "not*base64!!"),
+            text_chunk("chara", &b64(&card_json("Ok", Some("chara_card_v2")))),
+        ]);
+        let path = temp_file("dupbad.png", &file);
         let card = load(&path);
+        assert_eq!(card.payloads.len(), 1);
         assert!(card
             .warnings
             .iter()
-            .any(|w| w.contains("duplicate") && !w.contains("conflicting")));
+            .any(|w| w.contains("chunk 1 of 2") && w.contains("chara")));
         fs::remove_file(path).ok();
     }
 

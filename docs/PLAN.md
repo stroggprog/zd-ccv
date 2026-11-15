@@ -35,11 +35,17 @@ Parsing rules:
    (case-insensitive) is `chara` or `ccv3`.
 2. Base64-decode each payload and parse it as JSON. A chunk that fails
    either step is reported as a warning block; the image is still shown.
-3. When both `ccv3` and `chara` chunks are present, `ccv3` takes precedence
-   (per the Character Card V3 spec).
-4. Duplicate chunks of the same keyword are common (real-world files carry
-   two `chara` chunks). The last chunk of each keyword wins; when the
-   payloads of duplicate chunks disagree, a warning block is displayed.
+ 3. When both `ccv3` and `chara` chunks are present, `ccv3` takes precedence
+    (per the Character Card V3 spec). The displayed default follows this
+    order: `ccv3` first, then `chara`.
+ 4. Duplicate chunks of the same keyword are common (real-world files carry
+    two `chara` chunks) and may legitimately hold different data, since
+    SillyTavern reads only the *first* `chara` chunk while other tools may
+    append a second one. The viewer keeps every chunk, defaults to the one
+    SillyTavern would use (the first of the highest-precedence keyword), and
+    offers a dropdown so the user can select which chunk to display. A chunk
+    that fails to decode is skipped with a warning; the rest remain
+    selectable.
 5. V1 cards are flat JSON without a `spec` wrapper; they are normalized to
    the V2 field model and labeled as V1.
 6. Plain `.json` card files (no PNG wrapper) are accepted; their content is
@@ -72,8 +78,14 @@ Parsing rules:
 - Two main panels side by side:
   - The left panel displays the portrait, scaled to fit the panel; the
     mouse wheel zooms; the panel scrolls when zoomed beyond fit.
-  - The right panel displays the card data and is scrollable. Each field
-    is in a separate visually delimited block (header + content):
+  - The right panel displays the card data and is scrollable. Its scroll
+    position resets to the top when the displayed card changes. Each field
+    is in a separate visually delimited block (header + content).
+    - When the file carries more than one embedded chunk, a "Embedded
+      chunk:" dropdown at the top of the panel lists every decoded chunk
+      (e.g. "chara 1 of 2 (Character Card V2)"); selecting one switches the
+      fields and raw JSON below to that chunk. The default selection is the
+      chunk SillyTavern would use.
     - Blocks appear in spec order: name, nickname (V3), description,
       personality, scenario, first_mes, alternate greetings, mes_example
       (rendered per `<START>` dialogue block), creator_notes,
@@ -81,12 +93,12 @@ Parsing rules:
       post_history_instructions, tags, creator, character_version,
       source (V3), creation/modification dates (V3), embedded lorebook
       (`character_book`, entry count + per-entry blocks), extensions
-      (as formatted JSON), then the raw JSON of each embedded payload in
-      collapsible blocks.
+      (as formatted JSON), then the raw JSON of the selected chunk in a
+      collapsible block.
     - Empty or absent fields render as a muted "not set" block so the
       order stays stable across cards.
-    - Warning blocks (conflicting or undecodable chunks, missing data)
-      render first, styled distinctly.
+    - Warning blocks (undecodable chunks, missing data) render first,
+      styled distinctly.
 
 ## Themes and persistence
 

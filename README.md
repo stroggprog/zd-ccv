@@ -15,11 +15,11 @@ data field the card contains, read-only.
   plain `.json` card exports.
 - Portrait viewer with fit-to-panel scaling and mouse-wheel zoom.
 - Scrollable data panel: one delimited block per field, in spec order,
-  including embedded lorebooks and raw JSON of each embedded payload.
+  including embedded lorebooks, a chunk selector for files that embed more
+  than one copy, and the raw JSON of the selected chunk.
 - Light and dark themes; first start follows the desktop theme, your
   choice is remembered.
-- Diagnostics for broken cards: missing metadata, undecodable chunks,
-  conflicting duplicate chunks.
+- Diagnostics for broken cards: missing metadata, undecodable chunks.
 
 ## Requirements
 
@@ -74,13 +74,19 @@ install -m 755 target/release/zd-ccv ~/.local/bin/
   theme selector switches between System, Light, and Dark.
 - **Left panel** - the card portrait, scaled to fit. Scroll the mouse
   wheel over it to zoom; scroll to pan when zoomed.
-- **Right panel** - all card fields, each in its own block: name,
-  description, personality, scenario, first message, alternate
-  greetings, example messages, creator notes, prompts, tags, lorebook
-  entries, and the raw JSON of each embedded payload (collapsible).
-  Unset fields appear as muted "not set" blocks. Warning blocks are
-  shown above the fields when a file has no card data or contains
-  conflicting metadata.
+- **Right panel** - all card fields for the currently selected chunk, each
+  in its own block: name, description, personality, scenario, first
+  message, alternate greetings, example messages, creator notes, prompts,
+  tags, lorebook entries, and the raw JSON of the chunk (collapsible).
+  Unset fields appear as muted "not set" blocks. The panel scrolls to the
+  top whenever you switch cards.
+- **Chunk selector** - SillyTavern reads only the first `chara` chunk of a
+  card, but some tools append a second `chara`/`ccv3` chunk with different
+  data. When a file embeds more than one chunk, an "Embedded chunk"
+  dropdown appears at the top of the right panel; the default is the chunk
+  SillyTavern would use, and you can switch to any other to inspect it.
+  Warning blocks are shown above the fields when a file has no card data
+  or a chunk cannot be decoded.
 
 ## Development
 

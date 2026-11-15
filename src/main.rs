@@ -56,6 +56,10 @@ struct Viewer {
     applied_dark: Option<bool>,
     zoom: f32,
     pan: Vec2,
+    /// Index of the embedded chunk currently displayed (see CardFile.payloads).
+    display_chunk: usize,
+    /// Bumped on every card switch; used to reset the data panel scroll.
+    card_view: u64,
     pending_dialog: Option<PendingDialog>,
     startup_dialog_done: bool,
 }
@@ -80,6 +84,8 @@ impl Viewer {
             applied_dark: None,
             zoom: 1.0,
             pan: Vec2::ZERO,
+            display_chunk: 0,
+            card_view: 0,
             pending_dialog: None,
             startup_dialog_done: false,
         };
@@ -91,6 +97,9 @@ impl Viewer {
         self.card = self.files.get(self.index).map(|p| card::load(p));
         self.zoom = 1.0;
         self.pan = Vec2::ZERO;
+        self.display_chunk = 0;
+        // Bump the scroll-area id so the right panel re-mounts scrolled to top.
+        self.card_view = self.card_view.wrapping_add(1);
     }
 
     fn set_files(&mut self, mut files: Vec<PathBuf>) {
@@ -345,12 +354,17 @@ impl Viewer {
             });
             return;
         };
+        let display_chunk = &mut self.display_chunk;
+        let card_view = self.card_view;
         egui::Panel::right("data")
             .resizable(true)
             .default_size(460.0)
             .min_size(240.0)
             .show(ui, |ui| {
+                // The id changes with every card switch, giving the new card
+                // a fresh (top-aligned) scroll position.
                 ScrollArea::vertical()
+                    .id_salt(("card_fields", card_view))
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for warning in &card.warnings {
@@ -358,20 +372,37 @@ impl Viewer {
                         }
                         if card.payloads.is_empty() {
                             warning_block(ui, "No character card data in this file.");
+                            return;
                         }
+                        let selected =
+                            (*display_chunk).min(card.payloads.len() - 1);
                         if card.payloads.len() > 1 {
-                            ui.weak("More than one card payload is embedded; fields below come from the first (preferred) one.");
+                            ui.horizontal(|ui| {
+                                ui.strong("Embedded chunk:");
+                                egui::ComboBox::from_id_salt("chunk_select")
+                                    .selected_text(card.payloads[selected].label())
+                                    .show_ui(ui, |ui| {
+                                        for (i, payload) in card.payloads.iter().enumerate() {
+                                            if ui
+                                                .selectable_label(i == selected, payload.label())
+                                                .clicked()
+                                            {
+                                                *display_chunk = i;
+                                            }
+                                        }
+                                    });
+                            });
+                            ui.weak("Duplicate chunks can hold different data; pick the one to display.");
+                        } else {
+                            ui.weak(card.payloads[selected].label());
                         }
-                        for (i, payload) in card.payloads.iter().enumerate() {
-                            ui.add_space(4.0);
-                            ui.weak(format!("{} · {}", payload.kind.keyword(), payload.spec.label()));
-                            if i == 0 {
-                                for field in card::fields(&payload.data, payload.spec) {
-                                    field_block(ui, &field);
-                                }
-                            }
-                            raw_json_block(ui, payload);
+                        ui.add_space(4.0);
+                        let idx = (*display_chunk).min(card.payloads.len() - 1);
+                        let payload = &card.payloads[idx];
+                        for field in card::fields(&payload.data, payload.spec) {
+                            field_block(ui, &field);
                         }
+                        raw_json_block(ui, payload);
                     });
             });
     }
