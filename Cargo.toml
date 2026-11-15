@@ -1,0 +1,19 @@
+[package]
+name = "zd-ccv"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-platform desktop viewer for SillyTavern character cards"
+license = "MIT"
+
+[dependencies]
+eframe = { version = "0.37", features = ["persistence"] }
+egui = "0.37"
+clap = { version = "4", features = ["derive"] }
+rfd = "0.18"
+image = { version = "0.25", default-features = false, features = ["png", "webp", "jpeg"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.23"
+flate2 = "1"
+walkdir = "2"
+dark-light = "3"

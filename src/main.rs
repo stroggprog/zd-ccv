@@ -1,0 +1,612 @@
+mod card;
+
+use card::{CardFile, FieldValue};
+use clap::Parser;
+use eframe::egui::{self, Align, Layout, RichText, ScrollArea, Sense, Vec2};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+/// A cross-platform desktop viewer for SillyTavern character cards.
+#[derive(Parser)]
+#[command(name = "zd-ccv", version, about)]
+struct Args {
+    /// Card files or folders to open (folders are scanned recursively).
+    /// Without arguments a folder picker opens at startup.
+    paths: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Theme {
+    System,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    const ALL: [Theme; 3] = [Theme::System, Theme::Light, Theme::Dark];
+
+    fn label(self) -> &'static str {
+        match self {
+            Theme::System => "System",
+            Theme::Light => "Light",
+            Theme::Dark => "Dark",
+        }
+    }
+
+    fn from_label(label: &str) -> Option<Theme> {
+        Theme::ALL.into_iter().find(|t| t.label() == label)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PendingDialog {
+    Files,
+    Folder,
+}
+
+struct Viewer {
+    files: Vec<PathBuf>,
+    index: usize,
+    card: Option<CardFile>,
+    textures: HashMap<PathBuf, egui::TextureHandle>,
+    /// Note about the last texture (decode error); keyed by path.
+    texture_errors: HashMap<PathBuf, String>,
+    theme: Theme,
+    system_dark: bool,
+    applied_dark: Option<bool>,
+    zoom: f32,
+    pan: Vec2,
+    pending_dialog: Option<PendingDialog>,
+    startup_dialog_done: bool,
+}
+
+impl Viewer {
+    fn new(cc: &eframe::CreationContext<'_>, files: Vec<PathBuf>) -> Self {
+        let theme = cc
+            .storage
+            .and_then(|s| eframe::get_value::<String>(s, "theme"))
+            .and_then(|s| Theme::from_label(&s))
+            .unwrap_or(Theme::System);
+        let system_dark = detect_system_dark();
+
+        let mut viewer = Viewer {
+            files,
+            index: 0,
+            card: None,
+            textures: HashMap::new(),
+            texture_errors: HashMap::new(),
+            theme,
+            system_dark,
+            applied_dark: None,
+            zoom: 1.0,
+            pan: Vec2::ZERO,
+            pending_dialog: None,
+            startup_dialog_done: false,
+        };
+        viewer.reload_card();
+        viewer
+    }
+
+    fn reload_card(&mut self) {
+        self.card = self.files.get(self.index).map(|p| card::load(p));
+        self.zoom = 1.0;
+        self.pan = Vec2::ZERO;
+    }
+
+    fn set_files(&mut self, mut files: Vec<PathBuf>) {
+        files.sort();
+        self.files = files;
+        self.index = 0;
+        self.reload_card();
+    }
+
+    fn file_name(&self) -> String {
+        self.files
+            .get(self.index)
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "no card loaded".into())
+    }
+
+    fn effective_dark(&self) -> bool {
+        match self.theme {
+            Theme::Light => false,
+            Theme::Dark => true,
+            Theme::System => self.system_dark,
+        }
+    }
+
+    fn step(&mut self, delta: isize) {
+        if self.files.is_empty() {
+            return;
+        }
+        let next = self.index as isize + delta;
+        if next < 0 || next >= self.files.len() as isize {
+            return;
+        }
+        self.index = next as usize;
+        self.reload_card();
+    }
+
+    /// Texture for the current card, decoding and uploading it lazily.
+    fn texture_for(&mut self, ui: &mut egui::Ui) -> Option<egui::TextureHandle> {
+        let path = self.files.get(self.index)?.clone();
+        if let Some(tex) = self.textures.get(&path) {
+            return Some(tex.clone());
+        }
+        if self.texture_errors.contains_key(&path) {
+            return None;
+        }
+        if path.extension().and_then(|e| e.to_str()) == Some("json") {
+            // JSON exports carry no portrait.
+            return None;
+        }
+        match decode_to_color_image(&path) {
+            Ok((color_image, name)) => {
+                let tex = ui
+                    .ctx()
+                    .load_texture(name, color_image, egui::TextureOptions::LINEAR);
+                self.textures.insert(path, tex.clone());
+                Some(tex)
+            }
+            Err(e) => {
+                self.texture_errors.insert(path, e);
+                None
+            }
+        }
+    }
+}
+
+fn decode_to_color_image(path: &std::path::Path) -> Result<(egui::ColorImage, String), String> {
+    let img = image::ImageReader::open(path)
+        .map_err(|e| format!("could not open image: {e}"))?
+        .with_guessed_format()
+        .map_err(|e| format!("could not read image: {e}"))?
+        .decode()
+        .map_err(|e| format!("could not decode image: {e}"))?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    let mut size_ok = (w as usize, h as usize);
+    const MAX_SIDE: u32 = 8192;
+    let rgba = if w > MAX_SIDE || h > MAX_SIDE {
+        let scale = MAX_SIDE as f32 / w.max(h) as f32;
+        let nw = ((w as f32 * scale) as u32).max(1);
+        let nh = ((h as f32 * scale) as u32).max(1);
+        size_ok = (nw as usize, nh as usize);
+        image::imageops::resize(&rgba, nw, nh, image::imageops::FilterType::Triangle)
+    } else {
+        rgba
+    };
+    let color =
+        egui::ColorImage::from_rgba_unmultiplied(size_ok.into(), rgba.as_flat_samples().as_slice());
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "texture".into());
+    Ok((color, name))
+}
+
+fn detect_system_dark() -> bool {
+    match dark_light::detect() {
+        Ok(dark_light::Mode::Dark) => true,
+        Ok(dark_light::Mode::Light) => false,
+        // Unspecified or undetectable: assume dark.
+        _ => true,
+    }
+}
+
+impl eframe::App for Viewer {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "theme", &self.theme.label().to_string());
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if !self.startup_dialog_done {
+            self.startup_dialog_done = true;
+            if self.files.is_empty() {
+                self.pending_dialog = Some(PendingDialog::Folder);
+            }
+        }
+        apply_theme(ui.ctx(), self);
+
+        let mut dialog: Option<PendingDialog> = None;
+        egui::Panel::top("menubar").show(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Open Files...").clicked() {
+                        dialog = Some(PendingDialog::Files);
+                        ui.close();
+                    }
+                    if ui.button("Open Folder...").clicked() {
+                        dialog = Some(PendingDialog::Folder);
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("Quit").clicked() {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
+            });
+        });
+
+        self.toolbar(ui);
+        self.data_panel(ui);
+        self.image_panel(ui);
+
+        if self.pending_dialog.is_none() {
+            self.pending_dialog = dialog;
+        }
+        if let Some(kind) = self.pending_dialog.take() {
+            match kind {
+                PendingDialog::Files => {
+                    if let Some(files) = rfd::FileDialog::new()
+                        .set_title("Choose character card files")
+                        .add_filter("Character cards", &["png", "webp", "json"])
+                        .pick_files()
+                    {
+                        self.set_files(files);
+                    }
+                }
+                PendingDialog::Folder => {
+                    if let Some(folder) = rfd::FileDialog::new()
+                        .set_title("Choose a folder")
+                        .pick_folder()
+                    {
+                        self.set_files(expand_paths(&[folder]));
+                    }
+                }
+            }
+            ui.ctx().request_repaint();
+        }
+
+        // Keyboard navigation
+        let left = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
+        let right = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
+        if left {
+            self.step(-1);
+        }
+        if right {
+            self.step(1);
+        }
+    }
+}
+
+fn apply_theme(ctx: &egui::Context, viewer: &mut Viewer) {
+    // Re-detect the OS theme whenever System mode is active and the
+    // window regains focus; cheap enough and covers live changes.
+    let dark = viewer.effective_dark();
+    if viewer.applied_dark != Some(dark) {
+        let visuals = if dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
+        ctx.set_visuals(visuals);
+        viewer.applied_dark = Some(dark);
+    }
+}
+
+impl Viewer {
+    fn toolbar(&mut self, ui: &mut egui::Ui) {
+        let count = self.files.len();
+        egui::Panel::top("toolbar").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(count > 1 && self.index > 0, |ui| {
+                    if ui.button("<").on_hover_text("Previous card").clicked() {
+                        self.step(-1);
+                    }
+                });
+                ui.add_enabled_ui(count > 1 && self.index + 1 < count, |ui| {
+                    if ui.button(">").on_hover_text("Next card").clicked() {
+                        self.step(1);
+                    }
+                });
+                ui.separator();
+                if count == 0 {
+                    ui.weak("No cards loaded");
+                } else {
+                    ui.label(format!("{} / {}", self.index + 1, count));
+                    let name = self.file_name();
+                    let path = self
+                        .card
+                        .as_ref()
+                        .map(|c| c.path.display().to_string())
+                        .unwrap_or_default();
+                    ui.strong(name).on_hover_text(path);
+                }
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    egui::ComboBox::from_id_salt("theme")
+                        .selected_text(self.theme.label())
+                        .show_ui(ui, |ui| {
+                            for theme in Theme::ALL {
+                                if ui
+                                    .selectable_value(&mut self.theme, theme, theme.label())
+                                    .changed()
+                                {
+                                    self.applied_dark = None;
+                                    if theme == Theme::System {
+                                        self.system_dark = detect_system_dark();
+                                    }
+                                    ui.ctx().request_repaint();
+                                }
+                            }
+                        });
+                    ui.label("Theme:");
+                });
+            });
+        });
+    }
+
+    fn data_panel(&mut self, ui: &mut egui::Ui) {
+        let Some(card) = self.card.as_ref() else {
+            egui::Panel::right("data").show(ui, |ui| {
+                ui.weak("Open files or a folder from the File menu.");
+            });
+            return;
+        };
+        egui::Panel::right("data")
+            .resizable(true)
+            .default_size(460.0)
+            .min_size(240.0)
+            .show(ui, |ui| {
+                ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for warning in &card.warnings {
+                            warning_block(ui, warning);
+                        }
+                        if card.payloads.is_empty() {
+                            warning_block(ui, "No character card data in this file.");
+                        }
+                        if card.payloads.len() > 1 {
+                            ui.weak("More than one card payload is embedded; fields below come from the first (preferred) one.");
+                        }
+                        for (i, payload) in card.payloads.iter().enumerate() {
+                            ui.add_space(4.0);
+                            ui.weak(format!("{} · {}", payload.kind.keyword(), payload.spec.label()));
+                            if i == 0 {
+                                for field in card::fields(&payload.data, payload.spec) {
+                                    field_block(ui, &field);
+                                }
+                            }
+                            raw_json_block(ui, payload);
+                        }
+                    });
+            });
+    }
+
+    fn image_panel(&mut self, ui: &mut egui::Ui) {
+        egui::CentralPanel::default().show(ui, |ui| {
+            let outer = ui.available_rect_before_wrap();
+            let texture = self.texture_for(ui);
+            let path = self.files.get(self.index).cloned();
+            let error = path.as_ref().and_then(|p| self.texture_errors.get(p).cloned());
+
+            match texture {
+                Some(tex) => {
+                    let avail = outer.size();
+                    let tex_size = tex.size_vec2();
+                    if avail.x > 0.0 && avail.y > 0.0 {
+                        let fit = (avail.x / tex_size.x).min(avail.y / tex_size.y);
+                        let disp = tex_size * fit * self.zoom;
+
+                        // Wheel zoom while hovering the image area.
+                        let hovered = ui.rect_contains_pointer(outer);
+                        if hovered {
+                            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+                            if scroll != 0.0 {
+                                self.zoom = (self.zoom * (1.0 + scroll * 0.0015)).clamp(0.1, 40.0);
+                            }
+                        }
+
+                        let (rect, response) =
+                            ui.allocate_exact_size(avail, Sense::click_and_drag());
+                        if response.dragged() {
+                            self.pan += response.drag_delta();
+                        }
+                        if response.double_clicked() {
+                            self.zoom = 1.0;
+                            self.pan = Vec2::ZERO;
+                        }
+                        let img_rect = egui::Rect::from_center_size(
+                            rect.center() + self.pan,
+                            disp.max(Vec2::splat(1.0)),
+                        );
+                        ui.put(
+                            img_rect,
+                            egui::Image::from_texture(&tex)
+                                .fit_to_exact_size(disp)
+                                .sense(Sense::hover()),
+                        );
+                    }
+                }
+                None => {
+                    if let Some(err) = error {
+                        warning_block(ui, &err);
+                    } else if path.is_some() {
+                        ui.centered_and_justified(|ui| {
+                            ui.weak("This card has no portrait image.");
+                        });
+                    } else {
+                        ui.centered_and_justified(|ui| {
+                            ui.heading("zd-ccv");
+                            ui.weak("Open character cards via File > Open Files... or File > Open Folder...");
+                        });
+                    }
+                }
+            }
+        });
+    }
+}
+
+fn warning_block(ui: &mut egui::Ui, text: &str) {
+    let warn = ui.visuals().warn_fg_color;
+    egui::Frame::group(ui.style())
+        .stroke(egui::Stroke::new(1.0, warn.linear_multiply(0.6)))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Warning").strong().color(warn));
+                ui.label(text);
+            });
+        });
+    ui.add_space(4.0);
+}
+
+fn field_block(ui: &mut egui::Ui, field: &card::Field) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.strong(field.label);
+            if matches!(field.value, FieldValue::Empty) {
+                ui.weak("(not set)");
+            }
+        });
+        match &field.value {
+            FieldValue::Empty => {}
+            FieldValue::Text(s) => {
+                ui.separator();
+                selectable_text(ui, s);
+            }
+            FieldValue::Dialogue(parts) => {
+                ui.separator();
+                for (i, part) in parts.iter().enumerate() {
+                    if parts.len() > 1 {
+                        ui.add_space(2.0);
+                        ui.weak(format!("Conversation {}", i + 1));
+                    }
+                    selectable_text(ui, part);
+                }
+            }
+            FieldValue::Strings(items) => {
+                ui.separator();
+                for (i, item) in items.iter().enumerate() {
+                    if items.len() > 1 {
+                        ui.add_space(2.0);
+                        ui.weak(format!("#{}", i + 1));
+                    }
+                    selectable_text(ui, item);
+                }
+            }
+            FieldValue::Lorebook(book) => {
+                ui.separator();
+                lorebook_blocks(ui, book);
+            }
+            FieldValue::Json(value) => {
+                ui.separator();
+                let pretty = serde_json::to_string_pretty(value).unwrap_or_default();
+                selectable_text(ui, &pretty);
+            }
+        }
+    });
+    ui.add_space(4.0);
+}
+
+fn lorebook_blocks(ui: &mut egui::Ui, book: &serde_json::Value) {
+    if let Some(name) = book.get("name").and_then(|v| v.as_str()) {
+        if !name.is_empty() {
+            ui.label(RichText::new(name).italics());
+        }
+    }
+    let Some(entries) = book.get("entries").and_then(|v| v.as_array()) else {
+        selectable_text(ui, &serde_json::to_string_pretty(book).unwrap_or_default());
+        return;
+    };
+    ui.weak(format!("{} entries", entries.len()));
+    for (i, entry) in entries.iter().enumerate() {
+        let comment = entry
+            .get("comment")
+            .and_then(|v| v.as_str())
+            .or_else(|| entry.get("name").and_then(|v| v.as_str()))
+            .map(|s| s.to_string());
+        let keys = entry
+            .get("keys")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|k| k.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+        let title = match (comment, keys.is_empty()) {
+            (Some(c), false) => format!("[{}] {c}", i + 1),
+            (Some(c), true) => format!("[{}] {c}", i + 1),
+            (None, _) => format!("[{}] {keys}", i + 1),
+        };
+        egui::CollapsingHeader::new(title).show(ui, |ui| {
+            if !keys.is_empty() {
+                ui.weak(format!("Keys: {keys}"));
+            }
+            if let Some(content) = entry.get("content").and_then(|v| v.as_str()) {
+                selectable_text(ui, content);
+            }
+        });
+    }
+}
+
+fn raw_json_block(ui: &mut egui::Ui, payload: &card::CardPayload) {
+    ui.add_space(2.0);
+    let title = format!("Raw JSON ({})", payload.kind.keyword());
+    egui::CollapsingHeader::new(RichText::new(title).weak()).show(ui, |ui| {
+        let pretty = serde_json::to_string_pretty(&payload.raw).unwrap_or_default();
+        selectable_text(ui, &pretty);
+    });
+}
+
+fn selectable_text(ui: &mut egui::Ui, text: &str) {
+    ui.add(
+        egui::Label::new(RichText::new(text).monospace())
+            .selectable(true)
+            .wrap_mode(egui::TextWrapMode::Wrap),
+    );
+}
+
+fn expand_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for path in paths {
+        if path.is_dir() {
+            for entry in walkdir::WalkDir::new(path)
+                .follow_links(true)
+                .into_iter()
+                .flatten()
+            {
+                if entry.file_type().is_file() && is_card_file(entry.path()) {
+                    files.push(entry.into_path());
+                }
+            }
+        } else if path.is_file() {
+            files.push(path.clone());
+        }
+    }
+    files.sort();
+    files.dedup();
+    files
+}
+
+fn is_card_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            let e = e.to_ascii_lowercase();
+            e == "png" || e == "webp" || e == "json"
+        })
+        .unwrap_or(false)
+}
+
+fn main() -> eframe::Result {
+    let args = Args::parse();
+    let mut files = Vec::new();
+    if !args.paths.is_empty() {
+        files = expand_paths(&args.paths);
+    }
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([1150.0, 720.0]),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "zd-ccv",
+        options,
+        Box::new(move |cc| Ok(Box::new(Viewer::new(cc, files)))),
+    )
+}
