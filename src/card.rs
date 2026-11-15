@@ -2,8 +2,8 @@
 //!
 //! Deliberately free of GUI dependencies so it can be unit tested against
 //! the fixture set in `samples/`. Parses the card JSON embedded in PNG
-//! `tEXt`/`zTXt`/`iTXt` chunks (keyword `chara` for V1/V2, `ccv3` for V3)
-//! as well as plain `.json` card exports.
+//! `tEXt`/`zTXt`/`iTXt` chunks (keyword `chara` for V1/V2, `ccv3` for V3).
+//! Only PNG files are loaded; other formats are ignored by the viewer.
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use flate2::read::ZlibDecoder;
@@ -18,8 +18,6 @@ pub enum PayloadKind {
     Chara,
     /// PNG tEXt chunk with keyword `ccv3` (V3).
     Ccv3,
-    /// The whole file is card JSON (`.json` export).
-    Json,
 }
 
 impl PayloadKind {
@@ -27,7 +25,6 @@ impl PayloadKind {
         match self {
             PayloadKind::Chara => "chara",
             PayloadKind::Ccv3 => "ccv3",
-            PayloadKind::Json => "json",
         }
     }
 }
@@ -111,35 +108,15 @@ fn kind_for_keyword(keyword: &str) -> Option<PayloadKind> {
     }
 }
 
-/// Load a card from any supported file. Never fails on malformed card
-/// data: problems are collected as warnings.
+/// Load a card from a PNG file. Never fails on malformed card data:
+/// problems are collected as warnings.
 pub fn load(path: &Path) -> CardFile {
     let mut warnings = Vec::new();
-    let payloads = match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) if ext.eq_ignore_ascii_case("json") => load_json_file(path, &mut warnings),
-        _ => load_png_file(path, &mut warnings),
-    };
+    let payloads = load_png_file(path, &mut warnings);
     CardFile {
         path: path.to_path_buf(),
         warnings,
         payloads,
-    }
-}
-
-fn load_json_file(path: &Path, warnings: &mut Vec<String>) -> Vec<CardPayload> {
-    let text = match fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) => {
-            warnings.push(format!("could not read file: {e}"));
-            return Vec::new();
-        }
-    };
-    match serde_json::from_str::<serde_json::Value>(&text) {
-        Ok(value) => vec![classify(PayloadKind::Json, value, 0, 1)],
-        Err(e) => {
-            warnings.push(format!("could not parse JSON: {e}"));
-            Vec::new()
-        }
     }
 }
 
@@ -684,17 +661,6 @@ mod tests {
         let card = load(&path);
         assert_eq!(card.payloads.len(), 1);
         assert_eq!(card.payloads[0].spec, SpecVersion::V2);
-        fs::remove_file(path).ok();
-    }
-
-    #[test]
-    fn json_card_file_loads() {
-        let path = temp_file(
-            "card.json",
-            card_json("JsonName", Some("chara_card_v2")).as_bytes(),
-        );
-        let card = load(&path);
-        assert_eq!(card.payloads[0].kind, PayloadKind::Json);
         fs::remove_file(path).ok();
     }
 

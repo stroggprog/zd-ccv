@@ -46,22 +46,21 @@ Parsing rules:
     offers a dropdown so the user can select which chunk to display. A chunk
     that fails to decode is skipped with a warning; the rest remain
     selectable.
-5. V1 cards are flat JSON without a `spec` wrapper; they are normalized to
-   the V2 field model and labeled as V1.
-6. Plain `.json` card files (no PNG wrapper) are accepted; their content is
-   parsed the same way. They have no portrait; the image panel shows a
-   placeholder.
+ 5. V1 cards are flat JSON without a `spec` wrapper; they are normalized to
+    the V2 field model and labeled as V1.
 
 ## Input handling
 
-- `zd-ccv [PATHS...]` accepts any number of files and/or folders on the
-  command line. Folders are scanned recursively for `.png`, `.webp`, and
-  `.json` files.
+- Only PNG files are loaded. The application accepts any number of files
+  and/or folders on the command line; a file is considered only if its
+  extension is `.png` (case-insensitive), and folders are scanned
+  recursively for `.png` files. Files with any other extension (`.webp`,
+  `.json`, etc.) are ignored, whether passed explicitly or found in a
+  folder.
 - With no arguments, the application opens a native folder picker.
-- The menu bar provides File > Open Files... (multi-select), File > Open
-  Folder..., and File > Quit. Dialog selections replace the current list.
-- Non-PNG images (e.g. WebP, which cannot carry card chunks) are displayed
-  with a "no card data" warning block instead of field blocks.
+- The menu bar provides File > Open Files... (multi-select, filtered to
+  PNG), File > Open Folder..., and File > Quit. Dialog selections replace
+  the current list.
 - A card PNG without any recognized chunk shows the image plus a warning
   ("image contains no character card data" - the file was likely
   re-saved or compressed by an outside tool).

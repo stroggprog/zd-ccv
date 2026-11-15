@@ -10,8 +10,9 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "zd-ccv", version, about)]
 struct Args {
-    /// Card files or folders to open (folders are scanned recursively).
-    /// Without arguments a folder picker opens at startup.
+    /// Card PNG files or folders to open; only `.png` files are loaded
+    /// (folders are scanned recursively). Without arguments a folder
+    /// picker opens at startup.
     paths: Vec<PathBuf>,
 }
 
@@ -146,10 +147,6 @@ impl Viewer {
         if self.texture_errors.contains_key(&path) {
             return None;
         }
-        if path.extension().and_then(|e| e.to_str()) == Some("json") {
-            // JSON exports carry no portrait.
-            return None;
-        }
         match decode_to_color_image(&path) {
             Ok((color_image, name)) => {
                 let tex = ui
@@ -250,7 +247,7 @@ impl eframe::App for Viewer {
                 PendingDialog::Files => {
                     if let Some(files) = rfd::FileDialog::new()
                         .set_title("Choose character card files")
-                        .add_filter("Character cards", &["png", "webp", "json"])
+                        .add_filter("PNG character cards", &["png"])
                         .pick_files()
                     {
                         self.set_files(files);
@@ -455,10 +452,6 @@ impl Viewer {
                 None => {
                     if let Some(err) = error {
                         warning_block(ui, &err);
-                    } else if path.is_some() {
-                        ui.centered_and_justified(|ui| {
-                            ui.weak("This card has no portrait image.");
-                        });
                     } else {
                         ui.centered_and_justified(|ui| {
                             ui.heading("zd-ccv");
@@ -605,7 +598,7 @@ fn expand_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
                     files.push(entry.into_path());
                 }
             }
-        } else if path.is_file() {
+        } else if path.is_file() && is_card_file(path) {
             files.push(path.clone());
         }
     }
@@ -614,13 +607,12 @@ fn expand_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
     files
 }
 
+/// Only PNG files are loaded; anything with another extension is ignored,
+/// whether passed explicitly or found in a folder scan.
 fn is_card_file(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .map(|e| {
-            let e = e.to_ascii_lowercase();
-            e == "png" || e == "webp" || e == "json"
-        })
+        .map(|e| e.eq_ignore_ascii_case("png"))
         .unwrap_or(false)
 }
 

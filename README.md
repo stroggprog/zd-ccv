@@ -9,10 +9,10 @@ data field the card contains, read-only.
 
 ## Features
 
-- View one or many cards: files and/or folders on the command line, or
-  pick them through native dialogs.
-- Supports Character Card V1, V2, and V3 data embedded in PNG files, and
-  plain `.json` card exports.
+- View one or many PNG cards: files and/or folders on the command line, or
+  pick them through native dialogs. Only `.png` files are loaded; other
+  extensions are ignored.
+- Supports Character Card V1, V2, and V3 data embedded in PNG files.
 - Portrait viewer with fit-to-panel scaling and mouse-wheel zoom.
 - Scrollable data panel: one delimited block per field, in spec order,
   including embedded lorebooks, a chunk selector for files that embed more
@@ -48,11 +48,11 @@ zd-ccv
 # One or more card files
 zd-ccv alice.png bob.png
 
-# A folder (scanned recursively for .png/.webp/.json files)
+# A folder (scanned recursively for .png files)
 zd-ccv ~/SillyTavern/data/default-user/characters
 
-# A mixed list
-zd-ccv somecards/ featured.json
+# A mix of files and folders (non-PNG entries are ignored)
+zd-ccv somecards/ featured.png
 ```
 
 ## Install
