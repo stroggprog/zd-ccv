@@ -7,7 +7,7 @@ base64-encoded JSON inside PNG `tEXt` metadata chunks (`chara` for
 V1/V2 cards, `ccv3` for V3). zd-ccv shows the portrait next to every
 data field the card contains, read-only.
 
-<img src="images/rusty.png" alt="screenshot" width=300px>
+<img src="images/rusty.png" alt="screenshot" width=600px>
 
 ## Features
 
