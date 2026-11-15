@@ -45,6 +45,13 @@ enum PendingDialog {
     Folder,
 }
 
+/// Frames during which the data panel is pinned to the top after a card
+/// load or chunk switch, so that residual smoothed wheel input (which egui
+/// keeps feeding for several frames after the user scrolls) cannot scroll
+/// the freshly loaded tall card away from the top. The wheel momentum
+/// decay is far past its tail after this budget.
+const SCROLL_PIN_FRAMES: u8 = 30;
+
 struct Viewer {
     files: Vec<PathBuf>,
     index: usize,
@@ -59,8 +66,10 @@ struct Viewer {
     pan: Vec2,
     /// Index of the embedded chunk currently displayed (see CardFile.payloads).
     display_chunk: usize,
-    /// Bumped on every card switch; used to reset the data panel scroll.
-    card_view: u64,
+    /// Remaining frames of the data-panel top pin (SCROLL_PIN_FRAMES).
+    scroll_pin: u8,
+    #[cfg(test)]
+    last_scroll_id: Option<egui::Id>,
     pending_dialog: Option<PendingDialog>,
     startup_dialog_done: bool,
 }
@@ -86,7 +95,9 @@ impl Viewer {
             zoom: 1.0,
             pan: Vec2::ZERO,
             display_chunk: 0,
-            card_view: 0,
+            scroll_pin: 0,
+            #[cfg(test)]
+            last_scroll_id: None,
             pending_dialog: None,
             startup_dialog_done: false,
         };
@@ -99,8 +110,7 @@ impl Viewer {
         self.zoom = 1.0;
         self.pan = Vec2::ZERO;
         self.display_chunk = 0;
-        // Bump the scroll-area id so the right panel re-mounts scrolled to top.
-        self.card_view = self.card_view.wrapping_add(1);
+        self.scroll_pin = SCROLL_PIN_FRAMES;
     }
 
     fn set_files(&mut self, mut files: Vec<PathBuf>) {
@@ -352,55 +362,91 @@ impl Viewer {
             return;
         };
         let display_chunk = &mut self.display_chunk;
-        let card_view = self.card_view;
+        let scroll_pin = &mut self.scroll_pin;
+        #[cfg(test)]
+        let last_scroll_id = &mut self.last_scroll_id;
+        let force_top = *scroll_pin > 0;
         egui::Panel::right("data")
             .resizable(true)
             .default_size(460.0)
             .min_size(240.0)
             .show(ui, |ui| {
-                // The id changes with every card switch, giving the new card
-                // a fresh (top-aligned) scroll position.
-                ScrollArea::vertical()
-                    .id_salt(("card_fields", card_view))
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for warning in &card.warnings {
-                            warning_block(ui, warning);
-                        }
-                        if card.payloads.is_empty() {
-                            warning_block(ui, "No character card data in this file.");
-                            return;
-                        }
-                        let selected =
-                            (*display_chunk).min(card.payloads.len() - 1);
-                        if card.payloads.len() > 1 {
-                            ui.horizontal(|ui| {
-                                ui.strong("Embedded chunk:");
-                                egui::ComboBox::from_id_salt("chunk_select")
-                                    .selected_text(card.payloads[selected].label())
-                                    .show_ui(ui, |ui| {
-                                        for (i, payload) in card.payloads.iter().enumerate() {
-                                            if ui
-                                                .selectable_label(i == selected, payload.label())
-                                                .clicked()
-                                            {
-                                                *display_chunk = i;
-                                            }
+                // Stable id across cards. The scroll reset is done
+                // deterministically while the pin is active: purge the
+                // ScrollArea's persisted state (offset, kinetic velocity,
+                // animation targets), pin the offset to 0, and consume
+                // residual wheel smoothing, so a freshly loaded tall card
+                // cannot end up displayed halfway down.
+                let scroll_id = ui.make_persistent_id(egui::IdSalt::new("card_fields"));
+                #[cfg(test)]
+                {
+                    *last_scroll_id = Some(scroll_id);
+                }
+                if force_top {
+                    ui.ctx()
+                        .data_mut(|d| d.remove::<egui::containers::scroll_area::State>(scroll_id));
+                }
+                let mut scroll = ScrollArea::vertical()
+                    .id_salt("card_fields")
+                    .auto_shrink([false, false]);
+                if force_top {
+                    scroll = scroll.vertical_scroll_offset(0.0);
+                }
+                scroll.show(ui, |ui| {
+                    for warning in &card.warnings {
+                        warning_block(ui, warning);
+                    }
+                    if card.payloads.is_empty() {
+                        warning_block(ui, "No character card data in this file.");
+                        return;
+                    }
+                    let selected = (*display_chunk).min(card.payloads.len() - 1);
+                    if card.payloads.len() > 1 {
+                        ui.horizontal(|ui| {
+                            ui.strong("Embedded chunk:");
+                            egui::ComboBox::from_id_salt("chunk_select")
+                                .selected_text(card.payloads[selected].label())
+                                .show_ui(ui, |ui| {
+                                    for (i, payload) in card.payloads.iter().enumerate() {
+                                        if ui
+                                            .selectable_label(i == selected, payload.label())
+                                            .clicked()
+                                            && *display_chunk != i
+                                        {
+                                            *display_chunk = i;
+                                            *scroll_pin = SCROLL_PIN_FRAMES;
                                         }
-                                    });
-                            });
-                            ui.weak("Duplicate chunks can hold different data; pick the one to display.");
-                        } else {
-                            ui.weak(card.payloads[selected].label());
-                        }
-                        ui.add_space(4.0);
-                        let idx = (*display_chunk).min(card.payloads.len() - 1);
-                        let payload = &card.payloads[idx];
-                        for field in card::fields(&payload.data, payload.spec) {
-                            field_block(ui, &field);
-                        }
-                        raw_json_block(ui, payload);
-                    });
+                                    }
+                                });
+                        });
+                        ui.weak(
+                            "Duplicate chunks can hold different data; pick the one to display.",
+                        );
+                    } else {
+                        ui.weak(card.payloads[selected].label());
+                    }
+                    ui.add_space(4.0);
+                    let idx = (*display_chunk).min(card.payloads.len() - 1);
+                    let payload = &card.payloads[idx];
+                    for field in card::fields(&payload.data, payload.spec) {
+                        field_block(ui, &field);
+                    }
+                    raw_json_block(ui, payload);
+                });
+                if force_top {
+                    // Drop adjustments made during this frame (leftover
+                    // momentum, queued scroll-requests) before storing.
+                    ui.ctx()
+                        .data_mut(|d| d.remove::<egui::containers::scroll_area::State>(scroll_id));
+                    // Consume any wheel smoothing still queued for this
+                    // frame (the ScrollArea may have already applied part
+                    // of it; the state purge above undoes that).
+                    ui.ctx().input_mut(|i| i.smooth_scroll_delta = Vec2::ZERO);
+                    // Keep pinning for the frame budget so decaying wheel
+                    // momentum cannot scroll the new card off the top.
+                    *scroll_pin = scroll_pin.saturating_sub(1);
+                    ui.ctx().request_repaint();
+                }
             });
     }
 
@@ -632,4 +678,218 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| Ok(Box::new(Viewer::new(cc, files)))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use egui::{
+        containers::scroll_area::State, Event, Modifiers, MouseWheelUnit, Pos2, RawInput, Rect,
+    };
+
+    fn chunk(typ: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        out.extend_from_slice(typ);
+        out.extend_from_slice(body);
+        out.extend_from_slice(&[0, 0, 0, 0]);
+        out
+    }
+
+    fn png_card(name: &str, description: &str) -> Vec<u8> {
+        let json = serde_json::json!({
+            "spec": "chara_card_v2",
+            "spec_version": "2.0",
+            "data": {
+                "name": name,
+                "description": description,
+                "personality": "calm",
+                "scenario": "",
+                "first_mes": "",
+                "mes_example": "",
+                "creator_notes": "",
+                "system_prompt": "",
+                "post_history_instructions": "",
+                "alternate_greetings": [],
+                "tags": [],
+                "creator": "",
+                "character_version": "",
+                "extensions": {}
+            }
+        });
+        let payload = STANDARD.encode(json.to_string());
+        let mut body = b"chara".to_vec();
+        body.push(0);
+        body.extend_from_slice(payload.as_bytes());
+        let mut out = vec![0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        out.extend_from_slice(&chunk(b"IHDR", &[0u8; 13]));
+        out.extend_from_slice(&chunk(b"IDAT", b"fake"));
+        out.extend_from_slice(&chunk(b"tEXt", &body));
+        out.extend_from_slice(&chunk(b"IEND", b""));
+        out
+    }
+
+    fn temp_card(tag: &str, name: &str, words: usize) -> PathBuf {
+        let description = (0..words)
+            .map(|i| format!("alpha{i} beta gamma"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut path = std::env::temp_dir();
+        path.push(format!("zd-ccv-scroll-{tag}-{}.png", std::process::id()));
+        std::fs::write(&path, png_card(name, &description)).unwrap();
+        path
+    }
+
+    fn make_viewer(files: Vec<PathBuf>) -> Viewer {
+        let first = card::load(&files[0]);
+        let mut viewer = Viewer {
+            files,
+            index: 0,
+            card: None,
+            textures: HashMap::new(),
+            texture_errors: HashMap::new(),
+            theme: Theme::Light,
+            system_dark: false,
+            applied_dark: None,
+            zoom: 1.0,
+            pan: Vec2::ZERO,
+            display_chunk: 0,
+            scroll_pin: 0,
+            last_scroll_id: None,
+            pending_dialog: None,
+            startup_dialog_done: true,
+        };
+        viewer.card = Some(first);
+        viewer
+    }
+
+    fn frame(ctx: &egui::Context, viewer: &mut Viewer, t: f64, events: Vec<Event>) {
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 600.0))),
+            time: Some(t),
+            events,
+            ..Default::default()
+        };
+        let full_output = ctx.run_ui(raw, |ui| viewer.data_panel(ui));
+        // Headless harness: there is no GPU, so drop texture deltas
+        // explicitly (font atlas etc.) to satisfy egui's debug assert.
+        let mut delta = full_output.textures_delta;
+        delta.clear();
+        drop(delta);
+    }
+
+    fn scroll_offset(ctx: &egui::Context, viewer: &Viewer) -> f32 {
+        let id = viewer.last_scroll_id.expect("panel must render");
+        State::load(ctx, id)
+            .map(|s| s.clamped_offset().y)
+            .unwrap_or(0.0)
+    }
+
+    fn wheel(in_panel: Pos2) -> Vec<Event> {
+        vec![
+            Event::PointerMoved(in_panel),
+            Event::MouseWheel {
+                unit: MouseWheelUnit::Point,
+                delta: Vec2::new(0.0, -400.0),
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Wheel,
+                modifiers: Modifiers::NONE,
+            },
+        ]
+    }
+
+    #[test]
+    fn tall_card_switch_shows_panel_at_top() {
+        let a = temp_card("a", "Alice", 200);
+        let b = temp_card("b", "Bella", 200);
+        let ctx = egui::Context::default();
+        let mut viewer = make_viewer(vec![a.clone(), b.clone()]);
+
+        for i in 0..3 {
+            frame(&ctx, &mut viewer, i as f64 / 60.0, vec![]);
+        }
+        assert_eq!(scroll_offset(&ctx, &viewer), 0.0, "fresh card at top");
+
+        viewer.step(1);
+        for i in 3..12 {
+            frame(&ctx, &mut viewer, i as f64 / 60.0, vec![]);
+            assert_eq!(
+                scroll_offset(&ctx, &viewer),
+                0.0,
+                "switched to another tall card: panel must show the top (frame {i})"
+            );
+        }
+
+        std::fs::remove_file(a).ok();
+        std::fs::remove_file(b).ok();
+    }
+
+    #[test]
+    fn switch_pins_top_despite_wheel_momentum() {
+        let a = temp_card("c", "Alice", 200);
+        let b = temp_card("d", "Bella", 200);
+        let ctx = egui::Context::default();
+        let mut viewer = make_viewer(vec![a.clone(), b.clone()]);
+
+        let in_panel = Pos2::new(800.0, 300.0);
+        // No pin is active in this fixture (viewer built without reload);
+        // verify the harness scrolls at all.
+        frame(&ctx, &mut viewer, 0.0, vec![Event::PointerMoved(in_panel)]);
+        frame(&ctx, &mut viewer, 1.0 / 60.0, wheel(in_panel));
+        for i in 2..10 {
+            frame(
+                &ctx,
+                &mut viewer,
+                i as f64 / 60.0,
+                vec![Event::PointerMoved(in_panel)],
+            );
+        }
+        let scrolled = scroll_offset(&ctx, &viewer);
+        assert!(
+            scrolled > 100.0,
+            "harness sanity: wheel must move the offset, got {scrolled}"
+        );
+
+        // Switch cards while the pointer hovers the panel and the wheel
+        // smoothing is still feeding the scroll area.
+        viewer.step(1);
+        frame(
+            &ctx,
+            &mut viewer,
+            10.0 / 60.0,
+            vec![Event::PointerMoved(in_panel)],
+        );
+        for i in 11..30 {
+            frame(
+                &ctx,
+                &mut viewer,
+                i as f64 / 60.0,
+                vec![Event::PointerMoved(in_panel)],
+            );
+            assert_eq!(
+                scroll_offset(&ctx, &viewer),
+                0.0,
+                "new card must stay at top despite wheel momentum (frame {i})"
+            );
+        }
+        // After the pin budget expires, the fully decayed momentum must
+        // no longer be able to move the panel away from the top.
+        for i in 30..60 {
+            frame(
+                &ctx,
+                &mut viewer,
+                i as f64 / 60.0,
+                vec![Event::PointerMoved(in_panel)],
+            );
+        }
+        assert!(
+            scroll_offset(&ctx, &viewer) < 2.0,
+            "residual momentum after the pin window must be negligible, got {}",
+            scroll_offset(&ctx, &viewer)
+        );
+
+        std::fs::remove_file(a).ok();
+        std::fs::remove_file(b).ok();
+    }
 }

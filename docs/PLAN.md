@@ -77,10 +77,14 @@ Parsing rules:
 - Two main panels side by side:
   - The left panel displays the portrait, scaled to fit the panel; the
     mouse wheel zooms; the panel scrolls when zoomed beyond fit.
-  - The right panel displays the card data and is scrollable. Its scroll
-    position resets to the top when the displayed card changes. Each field
-    is in a separate visually delimited block (header + content).
-    - When the file carries more than one embedded chunk, a "Embedded
+  - The right panel displays the card data and is scrollable. Each field is
+    in a separate visually delimited block (header + content). Its scroll
+    position is pinned to the top for a short window after the displayed
+    card changes or a different embedded chunk is selected - the panel is
+    re-pinned each frame until egui's residual wheel smoothing has decayed
+    (bounded frame budget), so a tall description cannot end up displayed
+    halfway down right after a switch.
+    - When the file carries more than one embedded chunk, an "Embedded
       chunk:" dropdown at the top of the panel lists every decoded chunk
       (e.g. "chara 1 of 2 (Character Card V2)"); selecting one switches the
       fields and raw JSON below to that chunk. The default selection is the

@@ -78,8 +78,9 @@ install -m 755 target/release/zd-ccv ~/.local/bin/
   in its own block: name, description, personality, scenario, first
   message, alternate greetings, example messages, creator notes, prompts,
   tags, lorebook entries, and the raw JSON of the chunk (collapsible).
-  Unset fields appear as muted "not set" blocks. The panel scrolls to the
-  top whenever you switch cards.
+  Unset fields appear as muted "not set" blocks. The panel stays pinned
+  at the top after switching cards or embedded chunks, even if the mouse
+  wheel was still settling.
 - **Chunk selector** - SillyTavern reads only the first `chara` chunk of a
   card, but some tools append a second `chara`/`ccv3` chunk with different
   data. When a file embeds more than one chunk, an "Embedded chunk"
