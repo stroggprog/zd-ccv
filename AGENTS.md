@@ -36,6 +36,9 @@ After each completed, working change (feature, fix, or doc update):
 2. Run `cargo clippy` and fix warnings introduced by the change.
 3. Commit with a concise message describing the change.
 4. Push to the tracked remote branch (`git push`).
+5. Build the binaries so the local ones match the pushed commit -
+   `cargo build --release` (and `cargo build` for debug). The user tests
+   against these binaries, so never leave them behind HEAD.
 
 Commit small, commit often: one logical change per commit. Never commit a
 state where `cargo test` fails. Never commit secrets.
