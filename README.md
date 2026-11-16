@@ -8,6 +8,8 @@ base64-encoded JSON inside PNG `tEXt` metadata chunks (`chara` for
 V1/V2 cards, `ccv3` for V3). zd-ccv shows the portrait next to every
 data field the card contains, read-only.
 
+Prebuilt binaries for Linux and Windows cn be found (here)[https://philip-p-ide.uk/doku.php/blog/aardvaark/downloads#zd-ccv]
+
 <img src="images/rusty.png" alt="screenshot" width=600px>
 
 ## Features
@@ -51,7 +53,7 @@ zd-ccv
 # One or more card files
 zd-ccv alice.png bob.png
 
-# A folder (loads its .png files; subfolders are not traversed)
+# A folder (scanned recursively for .png files)
 zd-ccv ~/SillyTavern/data/default-user/characters
 
 # A mix of files and folders (non-PNG entries are ignored)
