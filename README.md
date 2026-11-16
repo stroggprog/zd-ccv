@@ -8,7 +8,7 @@ base64-encoded JSON inside PNG `tEXt` metadata chunks (`chara` for
 V1/V2 cards, `ccv3` for V3). zd-ccv shows the portrait next to every
 data field the card contains, read-only.
 
-Prebuilt binaries for Linux and Windows cn be found (here)[https://philip-p-ide.uk/doku.php/blog/aardvaark/downloads#zd-ccv]
+Prebuilt binaries for Linux and Windows cn be found (https://philip-p-ide.uk/doku.php/blog/aardvaark/downloads#zd-ccv)[here]
 
 <img src="images/rusty.png" alt="screenshot" width=600px>
 
