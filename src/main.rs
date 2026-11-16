@@ -11,8 +11,8 @@ use std::path::PathBuf;
 #[command(name = "zd-ccv", version, about)]
 struct Args {
     /// Card PNG files or folders to open; only `.png` files are loaded
-    /// (folders are scanned recursively). Without arguments a folder
-    /// picker opens at startup.
+    /// (folders contribute their direct files, subfolders are not
+    /// traversed). Without arguments a folder picker opens at startup.
     paths: Vec<PathBuf>,
 }
 
@@ -631,17 +631,24 @@ fn selectable_text(ui: &mut egui::Ui, text: &str) {
     );
 }
 
+/// Expand command-line/dialog paths into a sorted list of card files.
+/// Folders contribute only their own direct `.png` entries; subfolders
+/// are not traversed.
 fn expand_paths(paths: &[PathBuf]) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for path in paths {
         if path.is_dir() {
-            for entry in walkdir::WalkDir::new(path)
-                .follow_links(true)
-                .into_iter()
-                .flatten()
-            {
-                if entry.file_type().is_file() && is_card_file(entry.path()) {
-                    files.push(entry.into_path());
+            let entries = match std::fs::read_dir(path) {
+                Ok(entries) => entries,
+                Err(e) => {
+                    eprintln!("could not read folder {}: {e}", path.display());
+                    continue;
+                }
+            };
+            for entry in entries.flatten() {
+                let child = entry.path();
+                if child.is_file() && is_card_file(&child) {
+                    files.push(child);
                 }
             }
         } else if path.is_file() && is_card_file(path) {
@@ -797,6 +804,25 @@ mod tests {
                 modifiers: Modifiers::NONE,
             },
         ]
+    }
+
+    #[test]
+    fn folder_scan_is_not_recursive() {
+        let root = std::env::temp_dir().join(format!("zd-ccv-scan-{}", std::process::id()));
+        let sub = root.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(root.join("top.png"), png_card("Top", "d")).unwrap();
+        std::fs::write(sub.join("nested.png"), png_card("Nested", "d")).unwrap();
+        std::fs::write(root.join("other.webp"), b"RIFFxxxxWEBP").unwrap();
+
+        let files = expand_paths(std::slice::from_ref(&root));
+        assert_eq!(
+            files,
+            vec![root.join("top.png")],
+            "only direct .png entries of the folder are loaded"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

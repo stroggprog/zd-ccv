@@ -10,8 +10,7 @@ Rust with egui/eframe. Deliberate choices:
 - `eframe`/`egui` for the GUI (pure Rust, built-in menu bar and light/dark
   visuals, persisted application state).
 - `clap` for CLI argument parsing, `rfd` for native file dialogs,
-  `image` for portrait decoding, `walkdir` for folder scans,
-  `directories` for the config path, `dark-light` for OS theme detection,
+  `image` for portrait decoding, `dark-light` for OS theme detection,
   `serde_json`/`base64`/`flate2` for card data extraction.
 - The card parser (`src/card.rs`) has no GUI dependencies and is unit
   tested against `samples/`.
@@ -109,9 +108,8 @@ Parsing rules:
   persisted and restored on next start.
 - On first startup the effective theme follows the desktop theme
   (System mode, detected via the `dark-light` crate; re-checked per run).
-- Application state (theme choice, last opened folder) is persisted via
-  eframe's storage plus a config file under the platform config directory
-  (from the `directories` crate) if needed.
+- Application state (the theme choice) is persisted through eframe's
+  built-in storage; no separate config file is written.
 
 ## Out of scope (v1)
 

@@ -1,6 +1,7 @@
 # zd-ccv
 
 A cross-platform desktop viewer for SillyTavern character cards.
+(Zen Drako's Character Card Viewer)
 
 Character cards are PNG images that carry the character definition as
 base64-encoded JSON inside PNG `tEXt` metadata chunks (`chara` for
@@ -50,7 +51,7 @@ zd-ccv
 # One or more card files
 zd-ccv alice.png bob.png
 
-# A folder (scanned recursively for .png files)
+# A folder (loads its .png files; subfolders are not traversed)
 zd-ccv ~/SillyTavern/data/default-user/characters
 
 # A mix of files and folders (non-PNG entries are ignored)
