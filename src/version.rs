@@ -35,9 +35,9 @@ impl core::fmt::Display for Version {
 /// The current application version: the initial build number equals the
 /// commit count at introduction (28) plus one for that build.
 pub const VERSION: Version = Version {
-    major: 0,
-    minor: 1,
-    build: 31,
+    major: 1,
+    minor: 0,
+    build: 32,
 };
 
 #[cfg(test)]
