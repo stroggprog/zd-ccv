@@ -81,13 +81,15 @@ install -m 755 target/release/zd-ccv ~/.local/bin/
   (close it with the button, the Escape key, or by clicking outside).
   File > Quit exits.
 - **Toolbar** - `<` and `>` step through the loaded cards; the label
-  between them shows position and file name. Next to it, the export
-  buttons write JSON files beside the card: **Export Character**
+  between them shows position and file name. A second toolbar row
+  below carries the export buttons, which write JSON files beside the
+  card: **Export Character**
   (character without its lorebook, as `<name>.json`), **Export
   Lorebook** (the embedded lorebook as `<lorebook name>.json`; greyed
   out when the card has none), and **Export All** (the complete card
   including the lorebook, as `<name>.json`). Exports overwrite
-  same-named files; the status bar below shows what was written. On the right side the
+  same-named files; the status bar below shows what was written. The
+  export row has its own fixed position, independent of file names. On the right side the
   theme selector switches between System, Light, and Dark.
 - **Left panel** - the card portrait, scaled to fit. Scroll the mouse
   wheel over it to zoom; scroll to pan when zoomed.

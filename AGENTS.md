@@ -34,10 +34,12 @@ After each completed, working change (feature, fix, or doc update):
 
 1. Run `cargo fmt` and `cargo test` and make sure they pass.
 2. Run `cargo clippy` and fix warnings introduced by the change.
-3. Increment the `build` field in `src/version.rs` by exactly one -
-   never touch `major` or `minor` unless the user instructs it. The
-   increment belongs to the same commit as the change, so HEAD's
-   version always matches the binaries built below.
+3. Increment the `build` field in `src/version.rs` by exactly one and
+   set the `version` field in `Cargo.toml` to the same `major.minor.build`
+   (a unit test enforces the two stay in sync). Never touch `major` or
+   `minor` unless the user instructs it. The increment belongs to the
+   same commit as the change, so HEAD's version always matches the
+   binaries built below.
 4. Commit with a concise message describing the change.
 5. Push to the tracked remote branch (`git push`).
 6. Build the binaries so the local ones match the pushed commit -

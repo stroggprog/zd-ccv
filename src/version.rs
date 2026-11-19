@@ -37,12 +37,12 @@ impl core::fmt::Display for Version {
 pub const VERSION: Version = Version {
     major: 0,
     minor: 1,
-    build: 29,
+    build: 30,
 };
 
 #[cfg(test)]
 mod tests {
-    use super::Version;
+    use super::{Version, VERSION};
 
     #[test]
     fn version_formats_as_major_dot_minor_dot_build() {
@@ -53,5 +53,13 @@ mod tests {
         };
         assert_eq!(version.string(), "1.2.3");
         assert_eq!(version.to_string(), "1.2.3");
+    }
+
+    /// The Cargo manifest version must always mirror this struct; if
+    /// this test fails, `Cargo.toml` was not updated along with
+    /// `src/version.rs`.
+    #[test]
+    fn cargo_manifest_version_stays_in_sync() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), VERSION.string());
     }
 }

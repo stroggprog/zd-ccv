@@ -268,6 +268,7 @@ impl eframe::App for Viewer {
         });
 
         self.toolbar(ui);
+        self.export_bar(ui);
         self.status_bar(ui);
         self.data_panel(ui);
         self.image_panel(ui);
@@ -395,12 +396,6 @@ impl Viewer {
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let count = self.files.len();
-        let has_payloads = self.card.as_ref().is_some_and(|c| !c.payloads.is_empty());
-        let has_book = self.card.as_ref().is_some_and(|c| {
-            let idx = self.display_chunk.min(c.payloads.len().saturating_sub(1));
-            c.payloads.get(idx).is_some_and(card::has_lorebook)
-        });
-        let mut export: Option<ExportKind> = None;
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(count > 1 && self.index > 0, |ui| {
@@ -427,7 +422,41 @@ impl Viewer {
                     ui.strong(name).on_hover_text(path);
                 }
 
-                ui.separator();
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    egui::ComboBox::from_id_salt("theme")
+                        .selected_text(self.theme.label())
+                        .show_ui(ui, |ui| {
+                            for theme in Theme::ALL {
+                                if ui
+                                    .selectable_value(&mut self.theme, theme, theme.label())
+                                    .changed()
+                                {
+                                    self.applied_dark = None;
+                                    if theme == Theme::System {
+                                        self.system_dark = detect_system_dark();
+                                    }
+                                    ui.ctx().request_repaint();
+                                }
+                            }
+                        });
+                    ui.label("Theme:");
+                });
+            });
+        });
+    }
+
+    /// The export toolbar: a fixed second row directly below the
+    /// navigation toolbar, so the buttons keep a constant position no
+    /// matter how long the current file name is.
+    fn export_bar(&mut self, ui: &mut egui::Ui) {
+        let has_payloads = self.card.as_ref().is_some_and(|c| !c.payloads.is_empty());
+        let has_book = self.card.as_ref().is_some_and(|c| {
+            let idx = self.display_chunk.min(c.payloads.len().saturating_sub(1));
+            c.payloads.get(idx).is_some_and(card::has_lorebook)
+        });
+        let mut export: Option<ExportKind> = None;
+        egui::Panel::top("export_bar").show(ui, |ui| {
+            ui.horizontal(|ui| {
                 ui.add_enabled_ui(has_payloads, |ui| {
                     if ui
                         .button("Export Character")
@@ -456,26 +485,6 @@ impl Viewer {
                     {
                         export = Some(ExportKind::All);
                     }
-                });
-
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    egui::ComboBox::from_id_salt("theme")
-                        .selected_text(self.theme.label())
-                        .show_ui(ui, |ui| {
-                            for theme in Theme::ALL {
-                                if ui
-                                    .selectable_value(&mut self.theme, theme, theme.label())
-                                    .changed()
-                                {
-                                    self.applied_dark = None;
-                                    if theme == Theme::System {
-                                        self.system_dark = detect_system_dark();
-                                    }
-                                    ui.ctx().request_repaint();
-                                }
-                            }
-                        });
-                    ui.label("Theme:");
                 });
             });
         });

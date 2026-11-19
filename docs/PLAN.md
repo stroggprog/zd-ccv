@@ -75,10 +75,13 @@ Parsing rules:
   - `<` and `>` buttons step to the previous/next card in the loaded list
     (disabled at the ends; wrap-around is not used).
   - A label "n / N - filename" shows position and current file.
-  - Export buttons: "Export Character", "Export Lorebook" (disabled when
-    the displayed chunk embeds no lorebook), and "Export All". They are
-    disabled when no card data is displayed.
   - A theme selector: System / Light / Dark.
+- Directly below the toolbar, a second fixed row carries the export
+  buttons: "Export Character", "Export Lorebook" (disabled when the
+  displayed chunk embeds no lorebook), and "Export All"; the whole row
+  is disabled when no card data is displayed. Keeping them on their
+  own row gives the buttons a constant position no matter how long the
+  current file name is.
 - When an export has been performed (or failed), a status bar strip at
   the bottom of the window shows the result until dismissed, replaced,
   or the card changes.
@@ -152,6 +155,8 @@ A `"character_book"` that is absent or `null` - common in real cards -
 - `major` and `minor` change only when the user instructs it.
 - `build` increments by one every time the project is built, as part of
   the same commit so HEAD always matches the shipped binary's version.
+- The `version` field in `Cargo.toml` mirrors the struct; a unit test
+  (`cargo_manifest_version_stays_in_sync`) fails if the two ever drift.
 
 ## Out of scope (v1)
 
