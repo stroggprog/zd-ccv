@@ -260,6 +260,7 @@ impl eframe::App for Viewer {
                         self.about_open = true;
                         ui.close();
                     }
+                    ui.separator();
                     if ui.button("Quit").clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
