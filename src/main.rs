@@ -39,6 +39,13 @@ impl Theme {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExportKind {
+    Character,
+    Lorebook,
+    All,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum PendingDialog {
     Files,
@@ -68,6 +75,9 @@ struct Viewer {
     display_chunk: usize,
     /// Remaining frames of the data-panel top pin (SCROLL_PIN_FRAMES).
     scroll_pin: u8,
+    /// Last export result or error, shown in the status bar until
+    /// dismissed or replaced (cleared on card change).
+    status: Option<(String, bool)>,
     #[cfg(test)]
     last_scroll_id: Option<egui::Id>,
     pending_dialog: Option<PendingDialog>,
@@ -96,6 +106,7 @@ impl Viewer {
             pan: Vec2::ZERO,
             display_chunk: 0,
             scroll_pin: 0,
+            status: None,
             #[cfg(test)]
             last_scroll_id: None,
             pending_dialog: None,
@@ -111,6 +122,7 @@ impl Viewer {
         self.pan = Vec2::ZERO;
         self.display_chunk = 0;
         self.scroll_pin = SCROLL_PIN_FRAMES;
+        self.status = None;
     }
 
     fn set_files(&mut self, mut files: Vec<PathBuf>) {
@@ -246,6 +258,7 @@ impl eframe::App for Viewer {
         });
 
         self.toolbar(ui);
+        self.status_bar(ui);
         self.data_panel(ui);
         self.image_panel(ui);
 
@@ -303,8 +316,60 @@ fn apply_theme(ctx: &egui::Context, viewer: &mut Viewer) {
 }
 
 impl Viewer {
+    fn export(&mut self, kind: ExportKind) {
+        let outcome = self
+            .card
+            .as_ref()
+            .and_then(|card| {
+                let idx = self
+                    .display_chunk
+                    .min(card.payloads.len().saturating_sub(1));
+                let payload = card.payloads.get(idx)?;
+                let (path, content) = match kind {
+                    ExportKind::Character => (
+                        card::json_sibling(&card.path),
+                        card::export_character(payload),
+                    ),
+                    ExportKind::All => (card::json_sibling(&card.path), card::export_all(payload)),
+                    ExportKind::Lorebook => {
+                        let book = card::export_lorebook(payload)?;
+                        let name =
+                            card::lorebook_file_name(payload).unwrap_or_else(|| "lorebook".into());
+                        let dir = card.path.parent().unwrap_or(std::path::Path::new("."));
+                        (dir.join(format!("{name}.json")), book)
+                    }
+                };
+                Some((
+                    path.clone(),
+                    std::fs::write(&path, content).map_err(|e| e.to_string()),
+                ))
+            })
+            .unwrap_or_else(|| {
+                (
+                    PathBuf::from("(none)"),
+                    Err("no card data is displayed".to_string()),
+                )
+            });
+        let (path, result) = outcome;
+        self.status = Some(match result {
+            Ok(()) => (
+                format!("Exported: {} (overwrites existing files)", path.display()),
+                false,
+            ),
+            Err(e) => (format!("Export to {} failed: {e}", path.display()), true),
+        });
+    }
+
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let count = self.files.len();
+        let has_payloads = self.card.as_ref().is_some_and(|c| !c.payloads.is_empty());
+        let has_book = self.card.as_ref().is_some_and(|c| {
+            let idx = self.display_chunk.min(c.payloads.len().saturating_sub(1));
+            c.payloads
+                .get(idx)
+                .is_some_and(|p| p.data.get("character_book").is_some())
+        });
+        let mut export: Option<ExportKind> = None;
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(count > 1 && self.index > 0, |ui| {
@@ -331,6 +396,37 @@ impl Viewer {
                     ui.strong(name).on_hover_text(path);
                 }
 
+                ui.separator();
+                ui.add_enabled_ui(has_payloads, |ui| {
+                    if ui
+                        .button("Export Character")
+                        .on_hover_text("Write the character data (without any lorebook) to <image name>.json next to the image")
+                        .clicked()
+                    {
+                        export = Some(ExportKind::Character);
+                    }
+                    ui.add_enabled_ui(has_book, |ui| {
+                        if ui
+                            .button("Export Lorebook")
+                            .on_hover_text(if has_book {
+                                "Write the embedded lorebook to <lorebook name>.json in the image folder"
+                            } else {
+                                "The displayed chunk has no embedded lorebook"
+                            })
+                            .clicked()
+                        {
+                            export = Some(ExportKind::Lorebook);
+                        }
+                    });
+                    if ui
+                        .button("Export All")
+                        .on_hover_text("Write the complete card data, including any lorebook, to <image name>.json next to the image")
+                        .clicked()
+                    {
+                        export = Some(ExportKind::All);
+                    }
+                });
+
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     egui::ComboBox::from_id_salt("theme")
                         .selected_text(self.theme.label())
@@ -350,6 +446,27 @@ impl Viewer {
                         });
                     ui.label("Theme:");
                 });
+            });
+        });
+        if let Some(kind) = export {
+            self.export(kind);
+        }
+    }
+
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        let Some((text, is_error)) = self.status.clone() else {
+            return;
+        };
+        egui::Panel::bottom("status").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if is_error {
+                    ui.colored_label(ui.visuals().warn_fg_color, text);
+                } else {
+                    ui.label(text);
+                }
+                if ui.small_button("Dismiss").clicked() {
+                    self.status = None;
+                }
             });
         });
     }
@@ -763,6 +880,7 @@ mod tests {
             pan: Vec2::ZERO,
             display_chunk: 0,
             scroll_pin: 0,
+            status: None,
             last_scroll_id: None,
             pending_dialog: None,
             startup_dialog_done: true,
@@ -823,6 +941,58 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn export_buttons_write_files_next_to_the_card() {
+        let dir = std::env::temp_dir().join(format!("zd-ccv-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("hero.png");
+        std::fs::write(&png, {
+            let mut body = b"chara".to_vec();
+            body.push(0);
+            let json = serde_json::json!({
+                "spec": "chara_card_v2",
+                "spec_version": "2.0",
+                "data": {
+                    "name": "Hero",
+                    "description": "d",
+                    "character_book": {"name": "My World", "entries": [{"content": "x"}]}
+                }
+            });
+            body.extend_from_slice(STANDARD.encode(json.to_string()).as_bytes());
+            let mut out = vec![0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+            out.extend_from_slice(&chunk(b"IHDR", &[0u8; 13]));
+            out.extend_from_slice(&chunk(b"tEXt", &body));
+            out.extend_from_slice(&chunk(b"IEND", b""));
+            out
+        })
+        .unwrap();
+
+        let mut viewer = make_viewer(vec![png.clone()]);
+        viewer.status = None;
+
+        viewer.export(ExportKind::Character);
+        let text = std::fs::read_to_string(dir.join("hero.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(v["data"].get("character_book").is_none());
+        assert_eq!(v["data"]["name"], "Hero");
+
+        viewer.export(ExportKind::Lorebook);
+        let text = std::fs::read_to_string(dir.join("My World.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["name"], "My World");
+
+        viewer.export(ExportKind::All);
+        let text = std::fs::read_to_string(dir.join("hero.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(v["data"]["character_book"].is_object());
+
+        assert!(
+            !viewer.status.as_ref().unwrap().1,
+            "exports reported errors"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

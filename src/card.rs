@@ -481,6 +481,96 @@ fn format_unix(secs: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+// ---------------------------------------------------------------------------
+// Export
+// ---------------------------------------------------------------------------
+
+/// Target path for character/all exports: the source file with a `.json`
+/// extension.
+pub fn json_sibling(path: &Path) -> PathBuf {
+    path.with_extension("json")
+}
+
+/// The currently displayed character as a standalone card JSON document,
+/// with any embedded lorebook removed.
+pub fn export_character(payload: &CardPayload) -> String {
+    let mut raw = payload.raw.clone();
+    match payload.spec {
+        SpecVersion::V2 | SpecVersion::V3 => {
+            if let Some(data) = raw.get_mut("data").and_then(|v| v.as_object_mut()) {
+                data.remove("character_book");
+            }
+        }
+        _ => {
+            if let Some(obj) = raw.as_object_mut() {
+                obj.remove("character_book");
+            }
+        }
+    }
+    to_pretty(&raw)
+}
+
+/// The embedded lorebook as a standalone JSON document, if present.
+pub fn export_lorebook(payload: &CardPayload) -> Option<String> {
+    payload
+        .data
+        .get("character_book")
+        .filter(|b| b.is_object())
+        .map(to_pretty)
+}
+
+/// The name to use for the lorebook export file.
+pub fn lorebook_file_name(payload: &CardPayload) -> Option<String> {
+    payload
+        .data
+        .get("character_book")
+        .and_then(|b| b.get("name"))
+        .and_then(|n| n.as_str())
+        .filter(|n| !n.trim().is_empty())
+        .map(sanitize_file_name)
+}
+
+/// The full embedded payload, including any lorebook.
+pub fn export_all(payload: &CardPayload) -> String {
+    to_pretty(&payload.raw)
+}
+
+fn to_pretty(value: &serde_json::Value) -> String {
+    let mut text = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+    text.push('\n');
+    text
+}
+
+/// Make a string safe to use as a file name: path separators and other
+/// characters that are illegal on Windows are replaced, control
+/// characters stripped, and the result is length-capped.
+pub fn sanitize_file_name(name: &str) -> String {
+    let mut cleaned: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+                || (c as u32) < 0x20
+            {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    if cleaned.len() > 120 {
+        cleaned = cleaned.chars().take(120).collect();
+    }
+    let cleaned = cleaned
+        .trim_matches(|c: char| c == '.' || c == ' ')
+        .to_string();
+    if cleaned.is_empty() {
+        "lorebook".into()
+    } else {
+        cleaned
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -685,6 +775,66 @@ mod tests {
     fn unix_date_formatting() {
         assert_eq!(format_unix(0), "1970-01-01");
         assert_eq!(format_unix(1_700_000_000), "2023-11-14");
+    }
+
+    #[test]
+    fn export_character_strips_embedded_lorebook() {
+        let raw = serde_json::json!({
+            "spec": "chara_card_v2",
+            "spec_version": "2.0",
+            "data": {
+                "name": "Alice",
+                "description": "d",
+                "character_book": {"name": "Book of Alice", "entries": []}
+            }
+        });
+        let payload = classify(PayloadKind::Chara, raw, 0, 1);
+        let out: serde_json::Value = serde_json::from_str(&export_character(&payload)).unwrap();
+        assert!(out["data"].get("character_book").is_none());
+        assert_eq!(out["data"]["name"], "Alice");
+
+        let all: serde_json::Value = serde_json::from_str(&export_all(&payload)).unwrap();
+        assert!(all["data"]["character_book"].is_object());
+
+        let book = export_lorebook(&payload).unwrap();
+        assert!(book.contains("Book of Alice"));
+        assert_eq!(
+            lorebook_file_name(&payload).as_deref(),
+            Some("Book of Alice")
+        );
+    }
+
+    #[test]
+    fn export_handles_card_without_lorebook() {
+        let raw = serde_json::json!({
+            "spec": "chara_card_v2",
+            "spec_version": "2.0",
+            "data": {"name": "Solo", "description": "d"}
+        });
+        let payload = classify(PayloadKind::Chara, raw, 0, 1);
+        assert!(export_lorebook(&payload).is_none());
+        assert!(lorebook_file_name(&payload).is_none());
+        let out: serde_json::Value = serde_json::from_str(&export_character(&payload)).unwrap();
+        assert_eq!(out["data"]["name"], "Solo");
+    }
+
+    #[test]
+    fn sanitize_file_name_replaces_bad_characters() {
+        let name = sanitize_file_name("world/lore:book*?\"<>|");
+        for bad in ['/', '\\', ':', '*', '?', '"', '<', '>', '|'] {
+            assert!(!name.contains(bad), "{name} still contains {bad}");
+        }
+        assert_eq!(sanitize_file_name("  spaced. "), "spaced");
+        assert_eq!(sanitize_file_name("."), "lorebook");
+        assert_eq!(sanitize_file_name(""), "lorebook");
+    }
+
+    #[test]
+    fn json_sibling_replaces_extension() {
+        assert_eq!(
+            json_sibling(std::path::Path::new("/x/card.png")),
+            PathBuf::from("/x/card.json")
+        );
     }
 
     fn samples_dir() -> Option<PathBuf> {

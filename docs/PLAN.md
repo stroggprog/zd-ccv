@@ -72,7 +72,13 @@ Parsing rules:
   - `<` and `>` buttons step to the previous/next card in the loaded list
     (disabled at the ends; wrap-around is not used).
   - A label "n / N - filename" shows position and current file.
+  - Export buttons: "Export Character", "Export Lorebook" (disabled when
+    the displayed chunk embeds no lorebook), and "Export All". They are
+    disabled when no card data is displayed.
   - A theme selector: System / Light / Dark.
+- When an export has been performed (or failed), a status bar strip at
+  the bottom of the window shows the result until dismissed, replaced,
+  or the card changes.
 - Two main panels side by side:
   - The left panel displays the portrait, scaled to fit the panel; the
     mouse wheel zooms; the panel scrolls when zoomed beyond fit.
@@ -111,8 +117,28 @@ Parsing rules:
 - Application state (the theme choice) is persisted through eframe's
   built-in storage; no separate config file is written.
 
+## Export
+
+All exports serialize the currently displayed chunk (`ccv3`/`chara`
+selection in the data panel) as pretty-printed JSON, written next to the
+source image (no save dialog); existing files are overwritten, and the
+status bar reports the written path:
+
+- Export Character: the card object with any embedded lorebook
+  (`data.character_book`) removed, to the source file's name with a
+  `.json` extension.
+- Export Lorebook: the embedded `character_book` object as a standalone
+  lorebook JSON, to a file named after the lorebook's `name` field
+  (sanitized for the filesystem; falls back to `lorebook`) with a
+  `.json` extension, in the source file's folder. Disabled when the
+  displayed chunk has no lorebook.
+- Export All: the complete embedded payload, including the lorebook, to
+  the source file's name with a `.json` extension (this is the standard
+  SillyTavern card JSON export shape).
+
 ## Out of scope (v1)
 
-- Editing or writing card files of any kind.
+- Editing or re-writing card PNG files (the JSON exports are one-way;
+  exported `.json` files are not re-imported).
 - CHARX containers and V3 `chara-ext-asset_:` embedded assets.
 - Rendering of `extensions` sub-fields beyond raw JSON.

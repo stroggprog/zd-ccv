@@ -25,6 +25,8 @@ Prebuilt binaries for Linux and Windows can be found [here](https://philip-p-ide
 - Light and dark themes; first start follows the desktop theme, your
   choice is remembered.
 - Diagnostics for broken cards: missing metadata, undecodable chunks.
+- Export the displayed card as JSON: character only, lorebook only, or
+  everything combined.
 
 ## Requirements
 
@@ -75,7 +77,13 @@ install -m 755 target/release/zd-ccv ~/.local/bin/
   File > Open Folder... picks a directory. Both replace the current
   list. File > Quit exits.
 - **Toolbar** - `<` and `>` step through the loaded cards; the label
-  between them shows position and file name. On the right side the
+  between them shows position and file name. Next to it, the export
+  buttons write JSON files beside the card: **Export Character**
+  (character without its lorebook, as `<name>.json`), **Export
+  Lorebook** (the embedded lorebook as `<lorebook name>.json`; greyed
+  out when the card has none), and **Export All** (the complete card
+  including the lorebook, as `<name>.json`). Exports overwrite
+  same-named files; the status bar below shows what was written. On the right side the
   theme selector switches between System, Light, and Dark.
 - **Left panel** - the card portrait, scaled to fit. Scroll the mouse
   wheel over it to zoom; scroll to pan when zoomed.
