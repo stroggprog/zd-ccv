@@ -519,24 +519,49 @@ pub fn export_character(payload: &CardPayload) -> String {
     to_pretty(&raw)
 }
 
-/// The embedded lorebook as a standalone JSON document, if present.
+/// The embedded lorebook as a standalone JSON document, if present. A
+/// lorebook without a completed `name` gets the character's name
+/// inserted into its `name` field on export.
 pub fn export_lorebook(payload: &CardPayload) -> Option<String> {
-    payload
+    let mut book = payload
         .data
         .get("character_book")
-        .filter(|b| b.is_object())
-        .map(to_pretty)
+        .filter(|b| b.is_object())?
+        .clone();
+    let unnamed = trimmed_str(book.get("name")).is_none();
+    if unnamed {
+        let character = trimmed_str(payload.data.get("name"))
+            .unwrap_or("lorebook")
+            .to_string();
+        book.as_object_mut()?
+            .insert("name".to_string(), serde_json::Value::String(character));
+    }
+    Some(to_pretty(&book))
 }
 
-/// The name to use for the lorebook export file.
+/// The base file name for the lorebook export (no extension): the
+/// lorebook's own `name` when set, otherwise the character's name
+/// with `_lore` appended.
 pub fn lorebook_file_name(payload: &CardPayload) -> Option<String> {
-    payload
+    let book = payload
         .data
         .get("character_book")
-        .and_then(|b| b.get("name"))
-        .and_then(|n| n.as_str())
-        .filter(|n| !n.trim().is_empty())
-        .map(sanitize_file_name)
+        .filter(|b| b.is_object())?;
+    Some(match trimmed_str(book.get("name")) {
+        Some(name) => sanitize_file_name(name),
+        None => {
+            let character = trimmed_str(payload.data.get("name")).unwrap_or("");
+            format!("{}_lore", sanitize_file_name(character))
+        }
+    })
+}
+
+/// A non-empty trimmed string from a JSON value, if it is one.
+fn trimmed_str(value: Option<&serde_json::Value>) -> Option<&str> {
+    value
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
 }
 
 /// The full embedded payload, including any lorebook.
@@ -838,6 +863,39 @@ mod tests {
         );
         let out: serde_json::Value = serde_json::from_str(&export_character(&payload)).unwrap();
         assert_eq!(out["data"]["name"], "Solo");
+    }
+
+    #[test]
+    fn unnamed_lorebook_falls_back_to_character_name() {
+        let raw = serde_json::json!({
+            "spec": "chara_card_v2",
+            "spec_version": "2.0",
+            "data": {
+                "name": "Dia",
+                "description": "d",
+                "character_book": {"name": "", "entries": [{"content": "x"}]}
+            }
+        });
+        let payload = classify(PayloadKind::Chara, raw, 0, 1);
+        let text = export_lorebook(&payload).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            v["name"], "Dia",
+            "empty lorebook name is filled with the character name"
+        );
+        assert_eq!(lorebook_file_name(&payload).as_deref(), Some("Dia_lore"));
+
+        // Same when the name key is entirely absent.
+        let raw = serde_json::json!({
+            "spec": "chara_card_v2",
+            "spec_version": "2.0",
+            "data": {"name": "Sakura", "character_book": {"entries": []}}
+        });
+        let payload = classify(PayloadKind::Chara, raw, 0, 1);
+        let text = export_lorebook(&payload).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["name"], "Sakura");
+        assert_eq!(lorebook_file_name(&payload).as_deref(), Some("Sakura_lore"));
     }
 
     #[test]

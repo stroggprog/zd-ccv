@@ -130,10 +130,13 @@ status bar reports the written path:
 A `"character_book"` that is absent or `null` - common in real cards -
   counts as no lorebook for both the button state and the export.
 - Export Lorebook: the embedded `character_book` object as a standalone
-  lorebook JSON, to a file named after the lorebook's `name` field
-  (sanitized for the filesystem; falls back to `lorebook`) with a
-  `.json` extension, in the source file's folder. Disabled when the
-  displayed chunk has no lorebook.
+  lorebook JSON, to a file named after the lorebook's own `name` field
+  (sanitized for the filesystem) with a `.json` extension, in the
+  source file's folder. Disabled when the displayed chunk has no
+  lorebook. If the lorebook has no completed `name`, the character's
+  name is inserted into the exported `name` field and the file is named
+  after the character with `_lore` appended (e.g. character "Dia" with
+  an unnamed lorebook exports `Dia_lore.json` with `"name": "Dia"`).
 - Export All: the complete embedded payload, including the lorebook, to
   the source file's name with a `.json` extension (this is the standard
   SillyTavern card JSON export shape).

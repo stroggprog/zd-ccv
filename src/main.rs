@@ -994,6 +994,43 @@ mod tests {
     }
 
     #[test]
+    fn unnamed_lorebook_exports_as_character_lore_json() {
+        let dir = std::env::temp_dir().join(format!("zd-ccv-lore-fallback-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("main_dia-4475d1c2c371_spec_v2.png");
+        let mut body = b"chara".to_vec();
+        body.push(0);
+        let json = serde_json::json!({
+            "spec": "chara_card_v2",
+            "spec_version": "2.0",
+            "data": {
+                "name": "Dia",
+                "description": "d",
+                "character_book": {"name": "", "entries": [{"content": "x"}]}
+            }
+        });
+        body.extend_from_slice(STANDARD.encode(json.to_string()).as_bytes());
+        let mut out = vec![0x89u8, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        out.extend_from_slice(&chunk(b"IHDR", &[0u8; 13]));
+        out.extend_from_slice(&chunk(b"tEXt", &body));
+        out.extend_from_slice(&chunk(b"IEND", b""));
+        std::fs::write(&png, out).unwrap();
+
+        let mut viewer = make_viewer(vec![png]);
+        viewer.export(ExportKind::Lorebook);
+        let text = std::fs::read_to_string(dir.join("Dia_lore.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["name"], "Dia");
+        let expected = format!(
+            "Exported: {} (overwrites existing files)",
+            dir.join("Dia_lore.json").display()
+        );
+        assert_eq!(viewer.status.as_ref().unwrap().0, expected);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn tall_card_switch_shows_panel_at_top() {
         let a = temp_card("a", "Alice", 200);
         let b = temp_card("b", "Bella", 200);
