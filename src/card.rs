@@ -485,6 +485,15 @@ fn format_unix(secs: i64) -> String {
 // Export
 // ---------------------------------------------------------------------------
 
+/// Whether the payload embeds a usable lorebook. Many real-world cards
+/// store `"character_book": null`; only an object counts as available.
+pub fn has_lorebook(payload: &CardPayload) -> bool {
+    payload
+        .data
+        .get("character_book")
+        .is_some_and(|b| b.is_object())
+}
+
 /// Target path for character/all exports: the source file with a `.json`
 /// extension.
 pub fn json_sibling(path: &Path) -> PathBuf {
@@ -814,6 +823,19 @@ mod tests {
         let payload = classify(PayloadKind::Chara, raw, 0, 1);
         assert!(export_lorebook(&payload).is_none());
         assert!(lorebook_file_name(&payload).is_none());
+        assert!(!has_lorebook(&payload), "absent book is no book");
+
+        let raw_null = serde_json::json!({
+            "spec": "chara_card_v2",
+            "spec_version": "2.0",
+            "data": {"name": "Nullish", "character_book": null}
+        });
+        let null_payload = classify(PayloadKind::Chara, raw_null, 0, 1);
+        assert!(!has_lorebook(&null_payload), "a null book is no book");
+        assert!(
+            export_lorebook(&null_payload).is_none(),
+            "null book exports nothing"
+        );
         let out: serde_json::Value = serde_json::from_str(&export_character(&payload)).unwrap();
         assert_eq!(out["data"]["name"], "Solo");
     }

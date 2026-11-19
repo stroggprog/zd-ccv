@@ -127,6 +127,8 @@ status bar reports the written path:
 - Export Character: the card object with any embedded lorebook
   (`data.character_book`) removed, to the source file's name with a
   `.json` extension.
+A `"character_book"` that is absent or `null` - common in real cards -
+  counts as no lorebook for both the button state and the export.
 - Export Lorebook: the embedded `character_book` object as a standalone
   lorebook JSON, to a file named after the lorebook's `name` field
   (sanitized for the filesystem; falls back to `lorebook`) with a

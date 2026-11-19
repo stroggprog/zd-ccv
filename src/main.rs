@@ -365,9 +365,7 @@ impl Viewer {
         let has_payloads = self.card.as_ref().is_some_and(|c| !c.payloads.is_empty());
         let has_book = self.card.as_ref().is_some_and(|c| {
             let idx = self.display_chunk.min(c.payloads.len().saturating_sub(1));
-            c.payloads
-                .get(idx)
-                .is_some_and(|p| p.data.get("character_book").is_some())
+            c.payloads.get(idx).is_some_and(card::has_lorebook)
         });
         let mut export: Option<ExportKind> = None;
         egui::Panel::top("toolbar").show(ui, |ui| {
