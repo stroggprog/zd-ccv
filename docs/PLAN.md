@@ -58,7 +58,7 @@ Parsing rules:
   folder.
 - With no arguments, the application opens a native folder picker.
 - The menu bar provides File > Open Files... (multi-select, filtered to
-  PNG), File > Open Folder..., and File > Quit. Dialog selections replace
+  PNG), File > Open Folder..., File > About, and File > Quit. Dialog selections replace
   the current list.
 - A card PNG without any recognized chunk shows the image plus a warning
   ("image contains no character card data" - the file was likely
@@ -67,7 +67,10 @@ Parsing rules:
 ## UI layout
 
 - Top: a simple menu bar with the option File (Open Files..., Open
-  Folder..., Quit).
+  Folder..., About, Quit). About opens a modal dialog (centered, dimmed
+  backdrop) showing the application name, the version in
+  `major.minor.build` format, a one-line description, and a Close
+  button; it also closes on Escape or a click outside the dialog.
 - Below the menu bar, a toolbar:
   - `<` and `>` buttons step to the previous/next card in the loaded list
     (disabled at the ends; wrap-around is not used).
@@ -140,6 +143,15 @@ A `"character_book"` that is absent or `null` - common in real cards -
 - Export All: the complete embedded payload, including the lorebook, to
   the source file's name with a `.json` extension (this is the standard
   SillyTavern card JSON export shape).
+
+## Versioning
+
+- The version lives in `src/version.rs` as a `Version` struct with three
+  fields: `major`, `minor`, and `build`. It is the single source of
+  truth for both the About dialog and `zd-ccv --version`.
+- `major` and `minor` change only when the user instructs it.
+- `build` increments by one every time the project is built, as part of
+  the same commit so HEAD always matches the shipped binary's version.
 
 ## Out of scope (v1)
 

@@ -25,6 +25,8 @@ Prebuilt binaries for Linux and Windows can be found [here](https://philip-p-ide
 - Light and dark themes; first start follows the desktop theme, your
   choice is remembered.
 - Diagnostics for broken cards: missing metadata, undecodable chunks.
+- File > About shows the version (`major.minor.build`); it is also
+  available as `zd-ccv --version`.
 - Export the displayed card as JSON: character only, lorebook only, or
   everything combined.
 
@@ -75,7 +77,9 @@ install -m 755 target/release/zd-ccv ~/.local/bin/
 
 - **Menu bar** - File > Open Files... picks one or more files,
   File > Open Folder... picks a directory. Both replace the current
-  list. File > Quit exits.
+  list. File > About opens a small modal with the application version
+  (close it with the button, the Escape key, or by clicking outside).
+  File > Quit exits.
 - **Toolbar** - `<` and `>` step through the loaded cards; the label
   between them shows position and file name. Next to it, the export
   buttons write JSON files beside the card: **Export Character**

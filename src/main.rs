@@ -1,4 +1,7 @@
 mod card;
+mod version;
+
+use version::VERSION;
 
 use card::{CardFile, FieldValue};
 use clap::Parser;
@@ -8,7 +11,7 @@ use std::path::PathBuf;
 
 /// A cross-platform desktop viewer for SillyTavern character cards.
 #[derive(Parser)]
-#[command(name = "zd-ccv", version, about)]
+#[command(name = "zd-ccv", version = version::VERSION.leaked(), about)]
 struct Args {
     /// Card PNG files or folders to open; only `.png` files are loaded
     /// (folders contribute their direct files, subfolders are not
@@ -78,6 +81,8 @@ struct Viewer {
     /// Last export result or error, shown in the status bar until
     /// dismissed or replaced (cleared on card change).
     status: Option<(String, bool)>,
+    /// Whether the modal About dialog is open.
+    about_open: bool,
     #[cfg(test)]
     last_scroll_id: Option<egui::Id>,
     pending_dialog: Option<PendingDialog>,
@@ -107,6 +112,7 @@ impl Viewer {
             display_chunk: 0,
             scroll_pin: 0,
             status: None,
+            about_open: false,
             #[cfg(test)]
             last_scroll_id: None,
             pending_dialog: None,
@@ -250,6 +256,10 @@ impl eframe::App for Viewer {
                         ui.close();
                     }
                     ui.separator();
+                    if ui.button("About").clicked() {
+                        self.about_open = true;
+                        ui.close();
+                    }
                     if ui.button("Quit").clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
@@ -261,6 +271,7 @@ impl eframe::App for Viewer {
         self.status_bar(ui);
         self.data_panel(ui);
         self.image_panel(ui);
+        self.about_modal(ui);
 
         if self.pending_dialog.is_none() {
             self.pending_dialog = dialog;
@@ -316,6 +327,28 @@ fn apply_theme(ctx: &egui::Context, viewer: &mut Viewer) {
 }
 
 impl Viewer {
+    fn about_modal(&mut self, ui: &mut egui::Ui) {
+        if !self.about_open {
+            return;
+        }
+        let modal_id = ui.make_persistent_id("about_modal");
+        let response = egui::Modal::new(modal_id).show(ui.ctx(), |ui| {
+            ui.vertical_centered(|ui| {
+                ui.heading("zd-ccv");
+                ui.add_space(4.0);
+                ui.label(format!("Version {}", VERSION));
+                ui.weak("A cross-platform viewer for SillyTavern character cards");
+                ui.add_space(8.0);
+                if ui.button("Close").clicked() {
+                    ui.close();
+                }
+            });
+        });
+        if response.should_close() {
+            self.about_open = false;
+        }
+    }
+
     fn export(&mut self, kind: ExportKind) {
         let outcome = self
             .card
@@ -879,6 +912,7 @@ mod tests {
             display_chunk: 0,
             scroll_pin: 0,
             status: None,
+            about_open: false,
             last_scroll_id: None,
             pending_dialog: None,
             startup_dialog_done: true,
@@ -1028,6 +1062,54 @@ mod tests {
         assert_eq!(viewer.status.as_ref().unwrap().0, expected);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn about_modal_opens_and_closes_on_escape() {
+        let a = temp_card("am", "Alice", 20);
+        let ctx = egui::Context::default();
+        let mut viewer = make_viewer(vec![a.clone()]);
+
+        let about_frame = |viewer: &mut Viewer, t: f64, events: Vec<Event>| {
+            let raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 600.0))),
+                time: Some(t),
+                events,
+                ..Default::default()
+            };
+            let out = ctx.run_ui(raw, |ui| viewer.about_modal(ui));
+            let mut delta = out.textures_delta;
+            delta.clear();
+        };
+
+        // Closed by default; rendering while closed is a no-op.
+        assert!(!viewer.about_open);
+        about_frame(&mut viewer, 0.0, vec![]);
+        assert!(!viewer.about_open);
+
+        // Opening it keeps it open across frames without input.
+        viewer.about_open = true;
+        about_frame(&mut viewer, 1.0 / 60.0, vec![]);
+        assert!(
+            viewer.about_open,
+            "modal must stay open without dismiss input"
+        );
+
+        // Escape closes it.
+        about_frame(
+            &mut viewer,
+            2.0 / 60.0,
+            vec![Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+        );
+        assert!(!viewer.about_open, "escape must close the About dialog");
+
+        std::fs::remove_file(a).ok();
     }
 
     #[test]
