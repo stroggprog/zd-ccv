@@ -6,8 +6,10 @@ AICC cards (Rin Chat / "Rin Cards").
 
 Character cards are PNG images that carry the character definition as
 base64-encoded JSON inside PNG `tEXt` metadata chunks (`chara` for
-V1/V2 cards, `ccv3` for V3). zd-ccv shows the portrait next to every
+V1/V2 cards, `ccv3` for V3 and aicc). zd-ccv shows the portrait next to every
 data field the card contains, read-only.
+
+The primary purpose is to browse a folder containing cards.
 
 Prebuilt binaries for Linux and Windows can be found [here](https://philip-p-ide.uk/doku.php/blog/aardvaark/downloads#zd-ccv)
 
@@ -32,6 +34,7 @@ Prebuilt binaries for Linux and Windows can be found [here](https://philip-p-ide
   available as `zd-ccv --version`.
 - Export the displayed card as JSON: character only, lorebook only, or
   everything combined.
+- Will display non-character card PNG files as well
 
 ## Requirements
 
