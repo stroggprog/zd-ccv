@@ -1,6 +1,7 @@
 # zd-ccv
 
-A cross-platform desktop viewer for SillyTavern character cards.
+A cross-platform desktop viewer for SillyTavern character cards and
+AICC cards (Rin Chat / "Rin Cards").
 (Zen Drako's Character Card Viewer)
 
 Character cards are PNG images that carry the character definition as
@@ -17,7 +18,9 @@ Prebuilt binaries for Linux and Windows can be found [here](https://philip-p-ide
 - View one or many PNG cards: files and/or folders on the command line, or
   pick them through native dialogs. Only `.png` files are loaded; other
   extensions are ignored.
-- Supports Character Card V1, V2, and V3 data embedded in PNG files.
+- Supports Character Card V1, V2, and V3 data embedded in PNG files, and
+  AICC cards ("Rin Cards", the Rin Chat format) detected by their
+  `aicc_card` spec tag and rendered field by field.
 - Portrait viewer with fit-to-panel scaling and mouse-wheel zoom.
 - Scrollable data panel: one delimited block per field, in spec order,
   including embedded lorebooks, a chunk selector for files that embed more

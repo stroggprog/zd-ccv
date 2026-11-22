@@ -1,7 +1,9 @@
 # zd-ccv
 
 zd-ccv is a cross-platform desktop application that allows the user to view
-the contents of one or more SillyTavern character cards.
+the contents of one or more character cards: SillyTavern cards (V1/V2/V3)
+and AICC cards ("Rin Cards", the Rin Chat format), both stored as JSON
+inside PNG files.
 
 ## Technology
 
@@ -26,6 +28,9 @@ Chunk keyword and spec version:
 
 - `chara` - Character Card V1/V2 (`spec: chara_card_v2`).
 - `ccv3`  - Character Card V3 (`spec: chara_card_v3`), a superset of V2.
+- `chara`/`ccv3` - AICC card ("Rin Cards", `spec: aicc_card`,
+  `spec_version: 1.0`): Rin Chat embeds its native JSON under the same
+  SillyTavern keywords, so the format is detected from the `spec` tag.
 
 Parsing rules:
 
@@ -47,6 +52,8 @@ Parsing rules:
     selectable.
  5. V1 cards are flat JSON without a `spec` wrapper; they are normalized to
     the V2 field model and labeled as V1.
+ 6. AICC cards (`spec: "aicc_card"`) are labeled as "AICC Card" and
+    rendered from their native nested structure (see below).
 
 ## Input handling
 
@@ -100,7 +107,7 @@ Parsing rules:
       (e.g. "chara 1 of 2 (Character Card V2)"); selecting one switches the
       fields and raw JSON below to that chunk. The default selection is the
       chunk SillyTavern would use.
-    - Blocks appear in spec order: name, nickname (V3), description,
+    - SillyTavern blocks appear in spec order: name, nickname (V3), description,
       personality, scenario, first_mes, alternate greetings, mes_example
       (rendered per `<START>` dialogue block), creator_notes,
       creator_notes_multilingual (V3), system_prompt,
@@ -109,6 +116,16 @@ Parsing rules:
       (`character_book`, entry count + per-entry blocks), extensions
       (as formatted JSON), then the raw JSON of the selected chunk in a
       collapsible block.
+    - AICC blocks appear in the format's own export order: Name,
+      Description (`general_description`), Appearance, Personality
+      (`personality.core`), Behavior Rules, Speech Tone/Verbosity/Format/
+      Patterns, Background & History, World, Setting & Context, Greetings,
+      Example Dialogue, Group-Only Greetings, System Prompt, Post-History
+      Instructions, Depth Prompt (`prompts.depth_prompt.text`), Worldbook
+      (rendered like a lorebook from `world.worldbook_entries`), Display
+      Name, Creator, Creator Notes, Card Version, Tags, Card Format; plus
+      JSON blocks for optional extras (Generators, Regex Scripts,
+      Features, Assets, Doc Styles, Chat Style) when present.
     - Empty or absent fields render as a muted "not set" block so the
       order stays stable across cards.
     - Warning blocks (undecodable chunks, missing data) render first,
@@ -146,6 +163,12 @@ A `"character_book"` that is absent or `null` - common in real cards -
 - Export All: the complete embedded payload, including the lorebook, to
   the source file's name with a `.json` extension (this is the standard
   SillyTavern card JSON export shape).
+- AICC cards: Export Lorebook maps `world.worldbook_entries` (plus
+  `worldbook_name`) into the standalone lorebook shape; the button is
+  enabled only when that book has at least one entry. The lorebook's
+  name-file fallback applies as usual (`<worldbook name>.json`, else
+  `<character name>_lore.json`). Export Character keeps `world` intact -
+  it is part of the AICC card object, not a separable book.
 
 ## Versioning
 

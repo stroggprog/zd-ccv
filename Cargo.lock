@@ -4597,7 +4597,7 @@ dependencies = [
 
 [[package]]
 name = "zd-ccv"
-version = "1.0.32"
+version = "1.0.33"
 dependencies = [
  "base64",
  "clap",

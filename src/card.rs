@@ -35,6 +35,9 @@ pub enum SpecVersion {
     V1,
     V2,
     V3,
+    /// The AICC card format used by Rin Chat (`spec: "aicc_card"`),
+    /// embedded in PNGs under the same `chara`/`ccv3` keywords.
+    Aicc,
     Unknown,
 }
 
@@ -44,6 +47,7 @@ impl SpecVersion {
             SpecVersion::V1 => "Character Card V1",
             SpecVersion::V2 => "Character Card V2",
             SpecVersion::V3 => "Character Card V3",
+            SpecVersion::Aicc => "AICC Card",
             SpecVersion::Unknown => "Unknown card format",
         }
     }
@@ -183,6 +187,7 @@ fn classify(
     let spec = match value.get("spec").and_then(|s| s.as_str()) {
         Some("chara_card_v2") => SpecVersion::V2,
         Some("chara_card_v3") => SpecVersion::V3,
+        Some("aicc_card") => SpecVersion::Aicc,
         None => {
             if value.is_object() && value.get("name").is_some() {
                 SpecVersion::V1
@@ -194,7 +199,7 @@ fn classify(
     };
     let data = match spec {
         SpecVersion::V1 => value.clone(),
-        SpecVersion::V2 | SpecVersion::V3 => value
+        SpecVersion::V2 | SpecVersion::V3 | SpecVersion::Aicc => value
             .get("data")
             .cloned()
             .unwrap_or(serde_json::Value::Null),
@@ -327,6 +332,9 @@ pub struct Field {
 /// The card fields in display order. Fields that do not apply to `spec`
 /// are skipped entirely; applicable but absent fields become `Empty`.
 pub fn fields(data: &serde_json::Value, spec: SpecVersion) -> Vec<Field> {
+    if spec == SpecVersion::Aicc {
+        return aicc_fields(data);
+    }
     let mut out: Vec<Field> = Vec::new();
     let mut push = |label: &'static str, value: FieldValue| {
         out.push(Field { label, value });
@@ -481,13 +489,178 @@ fn format_unix(secs: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+/// AICC (Rin Chat) cards: `data` is a nested object where each aspect of
+/// the character has its own field. Fields are emitted in the order the
+/// format's export writes them; optional blocks appear only when present.
+fn aicc_fields(data: &serde_json::Value) -> Vec<Field> {
+    let mut out: Vec<Field> = Vec::new();
+    let mut push = |label: &'static str, value: FieldValue| out.push(Field { label, value });
+
+    let get = |path: &[&str]| -> Option<&serde_json::Value> {
+        let mut cur = data;
+        for key in path {
+            cur = cur.get(*key)?;
+        }
+        Some(cur)
+    };
+    let str_field = |path: &[&str]| -> FieldValue {
+        match get(path).and_then(|v| v.as_str()) {
+            Some(s) if !s.trim().is_empty() => FieldValue::Text(s.to_string()),
+            _ => FieldValue::Empty,
+        }
+    };
+    let list_field = |path: &[&str]| -> FieldValue {
+        let items = get(path).map(string_array_of).unwrap_or_default();
+        if items.is_empty() {
+            FieldValue::Empty
+        } else {
+            FieldValue::Strings(items)
+        }
+    };
+    let obj_present = |path: &[&str]| -> bool {
+        get(path).is_some_and(|v| match v {
+            serde_json::Value::Null => false,
+            serde_json::Value::String(s) => !s.trim().is_empty(),
+            serde_json::Value::Array(a) => !a.is_empty(),
+            serde_json::Value::Object(o) => {
+                !o.is_empty()
+                    && o.values().any(|v| match v {
+                        serde_json::Value::String(s) => !s.trim().is_empty(),
+                        serde_json::Value::Array(a) => !a.is_empty(),
+                        serde_json::Value::Object(o2) => !o2.is_empty(),
+                        _ => true,
+                    })
+            }
+            _ => true,
+        })
+    };
+
+    push("Name", str_field(&["name"]));
+    push("Description", str_field(&["general_description"]));
+    push("Appearance", str_field(&["appearance"]));
+    push("Personality", str_field(&["personality", "core"]));
+    push(
+        "Behavior Rules",
+        list_field(&["personality", "behavior_rules"]),
+    );
+    push(
+        "Speech Tone",
+        str_field(&["personality", "speech_style", "tone"]),
+    );
+    push(
+        "Speech Verbosity",
+        str_field(&["personality", "speech_style", "verbosity"]),
+    );
+    push(
+        "Speech Format",
+        str_field(&["personality", "speech_style", "format"]),
+    );
+    push(
+        "Speech Patterns",
+        list_field(&["personality", "speech_style", "patterns"]),
+    );
+    push("Background & History", str_field(&["background_history"]));
+    push(
+        "World, Setting & Context",
+        str_field(&["world_setting_context"]),
+    );
+    push("Greetings", list_field(&["dialogue", "greetings"]));
+    push(
+        "Example Dialogue",
+        list_field(&["dialogue", "dialogue_examples"]),
+    );
+    push(
+        "Group-Only Greetings",
+        list_field(&["dialogue", "group_only_greetings"]),
+    );
+    push("System Prompt", str_field(&["prompts", "system_prompt"]));
+    push(
+        "Post-History Instructions",
+        str_field(&["prompts", "post_history_instructions"]),
+    );
+    push(
+        "Depth Prompt",
+        str_field(&["prompts", "depth_prompt", "text"]),
+    );
+
+    if obj_present(&["world"]) {
+        let name = get(&["world", "worldbook_name"])
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let entries = get(&["world", "worldbook_entries"])
+            .cloned()
+            .unwrap_or_default();
+        push(
+            "Worldbook",
+            FieldValue::Lorebook(serde_json::json!({ "name": name, "entries": entries })),
+        );
+    }
+
+    push("Display Name", str_field(&["metadata", "char_ui_name"]));
+    push("Creator", str_field(&["metadata", "creator"]));
+    push("Creator Notes", str_field(&["metadata", "notes"]));
+    push("Card Version", str_field(&["metadata", "version"]));
+    push("Tags", list_field(&["metadata", "tags"]));
+    push("Card Format", str_field(&["metadata", "card_format"]));
+
+    if obj_present(&["metadata", "image_prompt_prefix"]) {
+        push(
+            "Image Prompt Prefix",
+            str_field(&["metadata", "image_prompt_prefix"]),
+        );
+    }
+    if obj_present(&["metadata", "image_negative_prefix"]) {
+        push(
+            "Image Negative Prefix",
+            list_field(&["metadata", "image_negative_prefix"]),
+        );
+    }
+    for (path, label) in [
+        (&["generators"][..], "Generators"),
+        (&["regex_scripts"][..], "Regex Scripts"),
+        (&["metadata", "features"][..], "Features"),
+        (&["assets"][..], "Assets"),
+        (&["doc_styles"][..], "Doc Styles"),
+        (&["chat_style"][..], "Chat Style"),
+    ] {
+        if obj_present(path) {
+            let value = get(path).cloned().unwrap_or_default();
+            push(label, FieldValue::Json(value));
+        }
+    }
+
+    out
+}
+
+/// The strings of a JSON array value (non-strings coerced, blanks dropped).
+fn string_array_of(value: &serde_json::Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|v| match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                })
+                .filter(|s| !s.trim().is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
 
-/// Whether the payload embeds a usable lorebook. Many real-world cards
-/// store `"character_book": null`; only an object counts as available.
+/// Whether the payload embeds a usable lorebook: a SillyTavern
+/// `character_book` object (many real-world cards store `"character_book":
+/// null`, which does not count), or, for AICC cards, a `world` block with
+/// at least one worldbook entry.
 pub fn has_lorebook(payload: &CardPayload) -> bool {
+    if payload.spec == SpecVersion::Aicc {
+        return aicc_entries(&payload.data).is_some_and(|e| !e.is_empty());
+    }
     payload
         .data
         .get("character_book")
@@ -519,10 +692,45 @@ pub fn export_character(payload: &CardPayload) -> String {
     to_pretty(&raw)
 }
 
+fn aicc_entries(data: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    data.get("world")?.get("worldbook_entries")?.as_array()
+}
+
+fn aicc_book(data: &serde_json::Value) -> Option<serde_json::Value> {
+    let entries = aicc_entries(data)?;
+    if entries.is_empty() {
+        return None;
+    }
+    let name = data
+        .get("world")
+        .and_then(|w| w.get("worldbook_name"))
+        .and_then(|n| n.as_str())
+        .unwrap_or("")
+        .to_string();
+    Some(serde_json::json!({
+        "name": name,
+        "entries": serde_json::Value::Array(entries.clone()),
+    }))
+}
+
 /// The embedded lorebook as a standalone JSON document, if present. A
 /// lorebook without a completed `name` gets the character's name
-/// inserted into its `name` field on export.
+/// inserted into its `name` field on export. AICC cards store their
+/// lore in `world.worldbook_entries`, which is exported in the
+/// standalone lorebook shape.
 pub fn export_lorebook(payload: &CardPayload) -> Option<String> {
+    if payload.spec == SpecVersion::Aicc {
+        let mut book = aicc_book(&payload.data)?;
+        let unnamed = trimmed_str(book.get("name")).is_none();
+        if unnamed {
+            let character = trimmed_str(payload.data.get("name"))
+                .unwrap_or("lorebook")
+                .to_string();
+            book.as_object_mut()?
+                .insert("name".to_string(), serde_json::Value::String(character));
+        }
+        return Some(to_pretty(&book));
+    }
     let mut book = payload
         .data
         .get("character_book")
@@ -543,6 +751,16 @@ pub fn export_lorebook(payload: &CardPayload) -> Option<String> {
 /// lorebook's own `name` when set, otherwise the character's name
 /// with `_lore` appended.
 pub fn lorebook_file_name(payload: &CardPayload) -> Option<String> {
+    if payload.spec == SpecVersion::Aicc {
+        let book = aicc_book(&payload.data)?;
+        return Some(match trimmed_str(book.get("name")) {
+            Some(name) => sanitize_file_name(name),
+            None => {
+                let character = trimmed_str(payload.data.get("name")).unwrap_or("");
+                format!("{}_lore", sanitize_file_name(character))
+            }
+        });
+    }
     let book = payload
         .data
         .get("character_book")
@@ -915,6 +1133,200 @@ mod tests {
             json_sibling(std::path::Path::new("/x/card.png")),
             PathBuf::from("/x/card.json")
         );
+    }
+
+    fn aicc_card_json(name: &str) -> String {
+        serde_json::json!({
+            "spec": "aicc_card",
+            "spec_version": "1.0",
+            "id": "6b1f2d0e-93a4-4c7e-b5d8-2f1a0c9e7d42",
+            "data": {
+                "name": name,
+                "general_description": "Night-ferry pilot.",
+                "appearance": "Lean and weathered.",
+                "personality": {
+                    "core": "Wry, patient, private.",
+                    "behavior_rules": ["Never speak for {{user}}."],
+                    "speech_style": {
+                        "tone": "dry",
+                        "verbosity": "medium",
+                        "format": "third person",
+                        "patterns": ["calls {{user}} 'passenger'"]
+                    }
+                },
+                "background_history": "Father drowned.",
+                "world_setting_context": "Flooded canal city.",
+                "dialogue": {
+                    "greetings": ["Last crossing, passenger."],
+                    "dialogue_examples": ["{{user}}: Scared?\n{{char}}: Never."],
+                    "group_only_greetings": []
+                },
+                "prompts": {
+                    "system_prompt": "",
+                    "post_history_instructions": "",
+                    "depth_prompt": { "text": "River is high.", "depth": 4, "role": "system" }
+                },
+                "world": {
+                    "worldbook_name": "",
+                    "worldbook_entries": [
+                        { "id": 0, "keys": ["Heron"], "comment": "The Heron", "content": "The ferry." }
+                    ]
+                },
+                "metadata": {
+                    "card_format": "AICC-Chat",
+                    "char_ui_name": "Ines Varga",
+                    "creator": "maker",
+                    "notes": "try the night greeting",
+                    "version": "1.2",
+                    "tags": ["fantasy", "adult"]
+                }
+            },
+            "aicc_id": "b541e858-cc37-4b9e-aed6-12363c0a32f8"
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn detects_and_maps_aicc_cards() {
+        let file = png_with(&[text_chunk("ccv3", &b64(&aicc_card_json("Ines Varga")))]);
+        let path = temp_file("aicc.png", &file);
+        let loaded = load(&path);
+        assert_eq!(loaded.payloads.len(), 1);
+        let payload = &loaded.payloads[0];
+        assert_eq!(payload.spec, SpecVersion::Aicc);
+
+        let fields = fields(&payload.data, payload.spec);
+        let labels: Vec<&str> = fields.iter().map(|f| f.label).collect();
+        for expected in [
+            "Name",
+            "Description",
+            "Appearance",
+            "Personality",
+            "Behavior Rules",
+            "Speech Tone",
+            "Speech Patterns",
+            "Background & History",
+            "World, Setting & Context",
+            "Greetings",
+            "Example Dialogue",
+            "Depth Prompt",
+            "Worldbook",
+            "Display Name",
+            "Creator",
+            "Creator Notes",
+            "Card Version",
+            "Tags",
+            "Card Format",
+        ] {
+            assert!(
+                labels.contains(&expected),
+                "missing AICC field {expected} in {labels:?}"
+            );
+        }
+
+        let field = |label: &str| {
+            fields
+                .iter()
+                .find(|f| f.label == label)
+                .map(|f| f.value.clone())
+        };
+        assert_eq!(
+            field("Description"),
+            Some(FieldValue::Text("Night-ferry pilot.".into()))
+        );
+        assert_eq!(
+            field("Behavior Rules"),
+            Some(FieldValue::Strings(
+                vec!["Never speak for {{user}}.".into()]
+            ))
+        );
+        // Empty fields still render (as muted "not set" blocks) so the
+        // order stays stable across cards.
+        assert_eq!(field("System Prompt"), Some(FieldValue::Empty));
+        assert_eq!(field("Group-Only Greetings"), Some(FieldValue::Empty));
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn aicc_worldbook_counts_as_lorebook_for_export() {
+        let raw: serde_json::Value = serde_json::from_str(&aicc_card_json("Dia")).unwrap();
+        let payload = classify(PayloadKind::Ccv3, raw, 0, 1);
+        assert!(has_lorebook(&payload));
+
+        let text = export_lorebook(&payload).unwrap();
+        let book: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            book["name"], "Dia",
+            "unnamed worldbook is filled with the character name"
+        );
+        assert_eq!(book["entries"].as_array().unwrap().len(), 1);
+
+        assert_eq!(lorebook_file_name(&payload).as_deref(), Some("Dia_lore"));
+
+        // A named worldbook keeps its own name.
+        let mut raw: serde_json::Value = serde_json::from_str(&aicc_card_json("Dia")).unwrap();
+        raw["data"]["world"]["worldbook_name"] = serde_json::json!("Lowmarsh");
+        let payload = classify(PayloadKind::Ccv3, raw, 0, 1);
+        assert_eq!(lorebook_file_name(&payload).as_deref(), Some("Lowmarsh"));
+        let book: serde_json::Value =
+            serde_json::from_str(&export_lorebook(&payload).unwrap()).unwrap();
+        assert_eq!(book["name"], "Lowmarsh");
+
+        // No entries means no lorebook.
+        let mut raw: serde_json::Value = serde_json::from_str(&aicc_card_json("Dia")).unwrap();
+        raw["data"]["world"]["worldbook_entries"] = serde_json::json!([]);
+        let payload = classify(PayloadKind::Ccv3, raw, 0, 1);
+        assert!(!has_lorebook(&payload));
+        assert!(export_lorebook(&payload).is_none());
+    }
+
+    #[test]
+    fn export_character_keeps_aicc_world() {
+        let raw: serde_json::Value = serde_json::from_str(&aicc_card_json("Ines")).unwrap();
+        let payload = classify(PayloadKind::Chara, raw, 0, 1);
+        let out: serde_json::Value = serde_json::from_str(&export_character(&payload)).unwrap();
+        assert_eq!(out["spec"], "aicc_card");
+        assert!(
+            out["data"]["world"]["worldbook_entries"].is_array(),
+            "AICC lore lives in data.world and is not stripped by character export"
+        );
+    }
+
+    #[test]
+    fn all_rin_samples_parse_as_aicc() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("samples/rin");
+        if !dir.is_dir() {
+            eprintln!("samples/rin not present, skipping");
+            return;
+        }
+        let mut count = 0;
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("png") {
+                continue;
+            }
+            let card = load(&path);
+            assert!(
+                !card.payloads.is_empty(),
+                "{}: expected card payloads, warnings: {:?}",
+                path.display(),
+                card.warnings
+            );
+            let payload = &card.payloads[0];
+            assert_eq!(payload.spec, SpecVersion::Aicc, "{}", path.display());
+            let name = fields(&payload.data, payload.spec)
+                .into_iter()
+                .find(|f| f.label == "Name")
+                .expect("name field");
+            assert_ne!(
+                name.value,
+                FieldValue::Empty,
+                "{}: empty name",
+                path.display()
+            );
+            count += 1;
+        }
+        assert_eq!(count, 4, "expected the four sample AICC cards");
     }
 
     fn samples_dir() -> Option<PathBuf> {
