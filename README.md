@@ -128,3 +128,7 @@ tests skip cleanly when it is absent.
 
 The specification lives in [docs/PLAN.md](docs/PLAN.md) and is the
 source of truth; README and PLAN are kept up to date with every change.
+
+The format of aicc (Rin Chat) cards used by this build has been placed
+in the docs folder, however the source of truth for this format is found
+at [https://rin.chat/card-format/](https://rin.chat/card-format/) and may have updated specs.
