@@ -63,11 +63,19 @@ zd-ccv
 # One or more card files
 zd-ccv alice.png bob.png
 
-# A folder (scanned recursively for .png files)
+# A folder (scanned non-recursively for .png files)
 zd-ccv ~/SillyTavern/data/default-user/characters
 
 # A mix of files and folders (non-PNG entries are ignored)
 zd-ccv somecards/ featured.png
+
+# help
+zd-ccv -h
+zd-ccv --help
+
+# version info (also available in the application via the File/About menu option)
+zd-ccv -V # note capitalisation
+zd-ccv --version
 ```
 
 ## Install
