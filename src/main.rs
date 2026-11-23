@@ -394,19 +394,18 @@ impl Viewer {
                 ui.add_space(8.0);
                 ui.hyperlink_to("GitHub: stroggprog/zd-ccv", update::REPO_URL);
                 ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui
-                        .button("Check 4 Update")
-                        .on_hover_text("Compare this build with the version in the GitHub repository's Cargo.toml")
-                        .clicked()
-                    {
-                        start_check = true;
-                    }
-                    if checking {
-                        ui.add(egui::Spinner::new());
-                        ui.weak("Checking\u{2026}");
-                    }
+                let check_button = ui.add_enabled_ui(!checking, |ui| {
+                    ui.button("Check 4 Update").on_hover_text(
+                        "Compare this build with the version in the GitHub repository's Cargo.toml",
+                    )
                 });
+                if check_button.inner.clicked() {
+                    start_check = true;
+                }
+                if checking {
+                    ui.spinner();
+                    ui.weak("Checking\u{2026}");
+                }
                 if let Some((message, is_error)) = &result {
                     ui.add_space(4.0);
                     if *is_error {
