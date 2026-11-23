@@ -30,8 +30,10 @@ Prebuilt binaries for Linux and Windows can be found [here](https://philip-p-ide
 - Light and dark themes; first start follows the desktop theme, your
   choice is remembered.
 - Diagnostics for broken cards: missing metadata, undecodable chunks.
-- File > About shows the version (`major.minor.build`); it is also
-  available as `zd-ccv --version`.
+- File > About shows the version (`major.minor.build`), links to the
+  GitHub repository, and offers "Check 4 Update", which compares the
+  installed build against the released `Cargo.toml` version on GitHub.
+  The version is also available as `zd-ccv --version`.
 - Export the displayed card as JSON: character only, lorebook only, or
   everything combined.
 - Will display non-character card PNG files as well
@@ -91,9 +93,11 @@ install -m 755 target/release/zd-ccv ~/.local/bin/
 
 - **Menu bar** - File > Open Files... picks one or more files,
   File > Open Folder... picks a directory. Both replace the current
-  list. File > About opens a small modal with the application version
-  (close it with the button, the Escape key, or by clicking outside).
-  File > Quit exits.
+  list. File > About opens a small modal with the application version,
+  a link that opens the GitHub repository in your web browser, and a
+  "Check 4 Update" button that reports whether a newer version exists
+  on GitHub (close the dialog with the button, the Escape key, or by
+  clicking outside). File > Quit exits.
 - **Toolbar** - `<` and `>` step through the loaded cards; the label
   between them shows position and file name. A second toolbar row
   below carries the export buttons, which write JSON files beside the

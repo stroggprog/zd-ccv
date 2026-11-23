@@ -76,8 +76,11 @@ Parsing rules:
 - Top: a simple menu bar with the option File (Open Files..., Open
   Folder..., About, Quit). About opens a modal dialog (centered, dimmed
   backdrop) showing the application name, the version in
-  `major.minor.build` format, a one-line description, and a Close
-  button; it also closes on Escape or a click outside the dialog.
+  `major.minor.build` format, a one-line description, a hyperlink to the
+  GitHub repository that opens the system web browser
+  (`https://github.com/stroggprog/zd-ccv`), a "Check 4 Update" button,
+  and a Close button; it also closes on Escape or a click outside the
+  dialog.
 - Below the menu bar, a toolbar:
   - `<` and `>` buttons step to the previous/next card in the loaded list
     (disabled at the ends; wrap-around is not used).
@@ -180,6 +183,20 @@ A `"character_book"` that is absent or `null` - common in real cards -
   the same commit so HEAD always matches the shipped binary's version.
 - The `version` field in `Cargo.toml` mirrors the struct; a unit test
   (`cargo_manifest_version_stays_in_sync`) fails if the two ever drift.
+- The About dialog's "Check 4 Update" button fetches the repository's
+  `Cargo.toml` from the `main` branch via
+  `raw.githubusercontent.com`, reads the `[package]` `version` (only
+  that section counts; dependency sections may have their own `version`
+  keys), and compares `major.minor.build` with the local version. Any
+  remote triple greater than the local one is treated as a newer
+  release.
+- The fetch runs on a background thread (ureq with rustls, 10 s global
+  timeout, 64 KiB read limit) so the UI never blocks; while running the
+  button shows a spinner and a re-check is ignored. The outcome is
+  shown in the About dialog and mirrored to the status bar so it
+  survives closing the dialog. Failures (network, HTTP status,
+  unparseable manifest) report "Update check failed: <reason>." in
+  warning color.
 
 ## Out of scope (v1)
 

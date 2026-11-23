@@ -37,7 +37,7 @@ impl core::fmt::Display for Version {
 pub const VERSION: Version = Version {
     major: 1,
     minor: 0,
-    build: 33,
+    build: 34,
 };
 
 #[cfg(test)]

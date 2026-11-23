@@ -1293,6 +1293,44 @@ mod tests {
     }
 
     #[test]
+    fn mix_folder_contains_both_formats_and_all_parse() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("samples/mix");
+        if !dir.is_dir() {
+            eprintln!("samples/mix not present, skipping");
+            return;
+        }
+        let mut entries = Vec::new();
+        collect_sample_pngs(&dir, &mut entries);
+        assert!(entries.len() >= 2, "expected a mixed fixture set");
+        let mut saw_v2 = false;
+        let mut saw_aicc = false;
+        for path in entries {
+            let card = load(&path);
+            let payload = card.payloads.first().unwrap_or_else(|| {
+                panic!(
+                    "{}: no payloads, warnings {:?}",
+                    path.display(),
+                    card.warnings
+                )
+            });
+            let name = fields(&payload.data, payload.spec)
+                .into_iter()
+                .find(|f| f.label == "Name")
+                .expect("name field");
+            assert_ne!(name.value, FieldValue::Empty, "{}", path.display());
+            match payload.spec {
+                SpecVersion::V2 => saw_v2 = true,
+                SpecVersion::Aicc => saw_aicc = true,
+                other => panic!("{}: unexpected spec {other:?}", path.display()),
+            }
+        }
+        assert!(
+            saw_v2 && saw_aicc,
+            "mix folder must hold both V2 and AICC cards"
+        );
+    }
+
+    #[test]
     fn all_rin_samples_parse_as_aicc() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("samples/rin");
         if !dir.is_dir() {
@@ -1334,23 +1372,35 @@ mod tests {
         dir.is_dir().then_some(dir)
     }
 
+    /// Every `.png` fixture under samples/, recursing into the format
+    /// subfolders (ccv2/, rin/, mix/, ...).
+    fn collect_sample_pngs(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_sample_pngs(&path, out);
+            } else if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("png"))
+            {
+                out.push(path);
+            }
+        }
+    }
+
     #[test]
     fn all_samples_parse() {
         let Some(dir) = samples_dir() else {
             eprintln!("samples/ not present, skipping");
             return;
         };
+        let mut entries = Vec::new();
+        collect_sample_pngs(&dir, &mut entries);
         let mut count = 0;
-        let entries: Vec<_> = fs::read_dir(&dir)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| {
-                p.extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|e| e.eq_ignore_ascii_case("png"))
-            })
-            .collect();
         for path in entries {
             let card = load(&path);
             assert!(
@@ -1384,7 +1434,7 @@ mod tests {
             eprintln!("samples/ not present, skipping");
             return;
         };
-        let path = dir.join("main_alice-89fca9a6_spec_v2.png");
+        let path = dir.join("ccv2/main_alice-89fca9a6_spec_v2.png");
         if !path.is_file() {
             return;
         }

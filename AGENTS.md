@@ -58,4 +58,5 @@ state where `cargo test` fails. Never commit secrets.
   weaken tests to accommodate its absence - skip sample-driven tests cleanly
   when samples/ is missing).
 - Do not add new dependencies without a clear need; prefer the existing set:
-  eframe/egui, clap, rfd, image, serde_json, base64, flate2, dark-light.
+  eframe/egui, clap, rfd, image, serde_json, base64, flate2, dark-light,
+  ureq.

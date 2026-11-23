@@ -1,4 +1,5 @@
 mod card;
+mod update;
 mod version;
 
 use version::VERSION;
@@ -83,6 +84,10 @@ struct Viewer {
     status: Option<(String, bool)>,
     /// Whether the modal About dialog is open.
     about_open: bool,
+    /// Receiver for the background update check, while one is running.
+    updater: Option<std::sync::mpsc::Receiver<(String, bool)>>,
+    /// Result of the last update check: (message, is_error).
+    update_result: Option<(String, bool)>,
     #[cfg(test)]
     last_scroll_id: Option<egui::Id>,
     pending_dialog: Option<PendingDialog>,
@@ -113,6 +118,8 @@ impl Viewer {
             scroll_pin: 0,
             status: None,
             about_open: false,
+            updater: None,
+            update_result: None,
             #[cfg(test)]
             last_scroll_id: None,
             pending_dialog: None,
@@ -242,6 +249,7 @@ impl eframe::App for Viewer {
             }
         }
         apply_theme(ui.ctx(), self);
+        self.poll_update(ui);
 
         let mut dialog: Option<PendingDialog> = None;
         egui::Panel::top("menubar").show(ui, |ui| {
@@ -329,11 +337,54 @@ fn apply_theme(ctx: &egui::Context, viewer: &mut Viewer) {
 }
 
 impl Viewer {
+    /// Collects the result of a running background update check. While a
+    /// check is in flight the UI keeps polling at a gentle interval.
+    fn poll_update(&mut self, ui: &mut egui::Ui) {
+        let Some(rx) = self.updater.as_ref() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(outcome) => {
+                self.updater = None;
+                self.update_result = Some(outcome.clone());
+                self.status = Some(outcome);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.updater = None;
+                let outcome = ("Update check failed: the worker stopped".to_string(), true);
+                self.update_result = Some(outcome.clone());
+                self.status = Some(outcome);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(250));
+            }
+        }
+    }
+
+    fn start_update_check(&mut self, ui: &mut egui::Ui) {
+        if self.updater.is_some() {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let outcome = update::check_outcome();
+            let _ = tx.send(outcome);
+        });
+        self.updater = Some(rx);
+        self.update_result = None;
+        ui.ctx().request_repaint();
+    }
+
     fn about_modal(&mut self, ui: &mut egui::Ui) {
         if !self.about_open {
             return;
         }
         let modal_id = ui.make_persistent_id("about_modal");
+        let checking = self.updater.is_some();
+        let result = self.update_result.clone();
+        let warn = ui.visuals().warn_fg_color;
+        let mut start_check = false;
         let response = egui::Modal::new(modal_id).show(ui.ctx(), |ui| {
             ui.vertical_centered(|ui| {
                 ui.heading("zd-ccv");
@@ -341,11 +392,38 @@ impl Viewer {
                 ui.label(format!("Version {}", VERSION));
                 ui.weak("A cross-platform viewer for SillyTavern character cards");
                 ui.add_space(8.0);
+                ui.hyperlink_to("GitHub: stroggprog/zd-ccv", update::REPO_URL);
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .button("Check 4 Update")
+                        .on_hover_text("Compare this build with the version in the GitHub repository's Cargo.toml")
+                        .clicked()
+                    {
+                        start_check = true;
+                    }
+                    if checking {
+                        ui.add(egui::Spinner::new());
+                        ui.weak("Checking\u{2026}");
+                    }
+                });
+                if let Some((message, is_error)) = &result {
+                    ui.add_space(4.0);
+                    if *is_error {
+                        ui.colored_label(warn, message);
+                    } else {
+                        ui.label(message);
+                    }
+                }
+                ui.add_space(8.0);
                 if ui.button("Close").clicked() {
                     ui.close();
                 }
             });
         });
+        if start_check {
+            self.start_update_check(ui);
+        }
         if response.should_close() {
             self.about_open = false;
         }
@@ -923,6 +1001,8 @@ mod tests {
             scroll_pin: 0,
             status: None,
             about_open: false,
+            updater: None,
+            update_result: None,
             last_scroll_id: None,
             pending_dialog: None,
             startup_dialog_done: true,
